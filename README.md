@@ -71,6 +71,39 @@ go build -ldflags "\
   ./cmd/vminfo
 ```
 
+## GitLab CI 与 Debian 运行
+
+仓库内置 `.gitlab-ci.yml`，会为 `main` 分支构建 Linux amd64 二进制产物：
+
+- job 名：`build-linux-amd64`
+- artifact 路径：`dist/vminfo-linux-amd64`
+
+在 Debian x86_64 VPS 上，可用仓库脚本下载并运行最新成功构建：
+
+```bash
+bash scripts/run_latest_vminfo.sh
+```
+
+默认执行：
+
+```bash
+vminfo summary
+```
+
+也可以传入参数：
+
+```bash
+bash scripts/run_latest_vminfo.sh version --json
+bash scripts/run_latest_vminfo.sh watch --count 1
+bash scripts/run_latest_vminfo.sh ps
+```
+
+如果仓库是私有的，先设置：
+
+```bash
+export GITLAB_TOKEN=your_gitlab_pat
+```
+
 ## 本地运行
 
 ```bash

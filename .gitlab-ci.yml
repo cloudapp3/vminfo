@@ -1,0 +1,41 @@
+image: golang:1.25
+
+stages:
+  - verify
+  - build
+
+variables:
+  GOCACHE: "$CI_PROJECT_DIR/.cache/go-build"
+  GOMODCACHE: "$CI_PROJECT_DIR/.cache/go/pkg/mod"
+
+cache:
+  key:
+    files:
+      - go.sum
+  paths:
+    - .cache/go-build
+    - .cache/go/pkg/mod
+
+before_script:
+  - go version
+
+test:
+  stage: verify
+  script:
+    - go test ./...
+
+vet:
+  stage: verify
+  script:
+    - go vet ./...
+
+build-linux-amd64:
+  stage: build
+  script:
+    - mkdir -p dist
+    - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/vminfo-linux-amd64 ./cmd/vminfo
+  artifacts:
+    name: "vminfo-linux-amd64-$CI_COMMIT_REF_SLUG-$CI_COMMIT_SHORT_SHA"
+    expire_in: 7 days
+    paths:
+      - dist/vminfo-linux-amd64
