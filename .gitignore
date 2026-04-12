@@ -1,0 +1,30 @@
+# Binaries
+/vminfo
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go build / coverage artifacts
+coverage.out
+coverage-*.out
+.coverprofile
+
+# Local caches
+.cache/
+.gocache/
+
+# IDE / editor
+.idea/
+.vscode/
+
+# OS / local tooling
+.DS_Store
+AGENTS.md
+.lingma/
+.codex
