@@ -7,11 +7,10 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
-	"time"
 
 	"github.com/gorilla/websocket"
 
-	"github.com/VPSMarket/vminfo/internal/collector"
+	"github.com/cloudapp3/vminfo/internal/collector"
 )
 
 //go:embed static/*
@@ -25,7 +24,7 @@ type Server struct {
 	server    *http.Server
 }
 
-// NewServer creates a new web server listening on addr (e.g. "127.0.0.1:9990").
+// NewServer creates a new web server listening on addr (e.g. "127.0.0.1:20021").
 func NewServer(addr string, c *collector.Collector) *Server {
 	return &Server{
 		addr:      addr,
@@ -60,13 +59,12 @@ func (s *Server) Start() error {
 
 	s.server = &http.Server{
 		Addr:    s.addr,
-		Handler: withCORS(withLogging(mux)),
+		Handler: withCORS(mux),
 	}
 
 	// Start WS broadcast loop
 	go s.broadcastLoop()
 
-	log.Printf("Web dashboard: http://%s", s.addr)
 	return s.server.ListenAndServe()
 }
 
@@ -179,7 +177,6 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	client := newWSClient(conn)
 	s.hub.register(client)
-	log.Printf("ws client connected (%d total)", s.hub.clientCount())
 
 	// Send current snapshot immediately (through the mutex-protected path)
 	if snap := s.collector.Latest(); snap != nil {
@@ -191,7 +188,6 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	for {
 		if _, _, err := conn.ReadMessage(); err != nil {
 			s.hub.unregister(client)
-			log.Printf("ws client disconnected (%d total)", s.hub.clientCount())
 			break
 		}
 	}
@@ -214,15 +210,5 @@ func withCORS(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r)
-	})
-}
-
-func withLogging(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		next.ServeHTTP(w, r)
-		if r.URL.Path != "/ws" && r.URL.Path != "/healthz" {
-			log.Printf("%s %s %s", r.Method, r.URL.Path, time.Since(start).Round(time.Millisecond))
-		}
 	})
 }

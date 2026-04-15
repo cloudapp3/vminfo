@@ -9,7 +9,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/VPSMarket/vminfo"
+	"github.com/cloudapp3/vminfo"
 )
 
 // ── Styles & Constants ────────────────────────────────────────────────
@@ -166,7 +166,10 @@ func (m Model) renderSystemContent() string {
 		lines = append(lines, m.kv("Virt", v))
 	}
 	if m.hasStats {
-		lines = append(lines, m.label("Uptime")+lipgloss.NewStyle().Foreground(CGreen).Render(formatUptime(m.stats.Uptime)))
+		lines = append(lines,
+			m.label("Uptime")+lipgloss.NewStyle().Foreground(CGreen).Render(formatUptime(m.stats.Uptime)),
+			m.kv("Procs", fmt.Sprintf("%d", m.stats.ProcessCount)),
+		)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -365,40 +368,235 @@ func (m Model) renderNetworkContent() string {
 		return strings.Join(lines, "\n")
 	}
 
+	summary := m.renderNetworkSummary()
+	if summary != "" {
+		lines = append(lines, summary)
+	}
+
+	traffic := m.renderNetworkTrafficSection()
+	if traffic != "" {
+		lines = append(lines, "", traffic)
+	}
+
+	ifaces := m.renderNetworkInterfaces()
+	if ifaces != "" {
+		lines = append(lines, "", ifaces)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderNetworkSummary() string {
 	cores := m.static.CPUCores
 	if cores == 0 {
 		cores = 1
 	}
+	wide := m.width >= 120
+	medium := m.width >= 80
 
-	// ── Summary line: Load + Net + TCP/UDP ──
-	loadColor := func(load float64) lipgloss.Color {
-		ratio := load / float64(cores)
-		return ThresholdColor(ratio * 100)
+	loadValue := func(load float64) string {
+		return lipgloss.NewStyle().Foreground(loadColor(load, cores)).Render(fmt.Sprintf("%.2f", load))
 	}
-	loadStr := lipgloss.NewStyle().Foreground(loadColor(m.stats.Load1)).Render(fmt.Sprintf("%.2f", m.stats.Load1)) + " " +
-		lipgloss.NewStyle().Foreground(loadColor(m.stats.Load5)).Render(fmt.Sprintf("%.2f", m.stats.Load5)) + " " +
-		lipgloss.NewStyle().Foreground(loadColor(m.stats.Load15)).Render(fmt.Sprintf("%.2f", m.stats.Load15))
-	rx := lipgloss.NewStyle().Foreground(CBrightGreen).Render(formatBytes(m.stats.NetInSpeed)+"/s")
-	tx := lipgloss.NewStyle().Foreground(CPink).Render(formatBytes(m.stats.NetOutSpeed)+"/s")
+	loadBar := func(load float64) string {
+		return lipgloss.NewStyle().Foreground(loadColor(load, cores)).Render(strings.Repeat(string(loadMiniBar(load, cores)), 3))
+	}
+	tcp := valueStyle.Render(fmt.Sprintf("%d", m.stats.TCPCount))
+	udp := valueStyle.Render(fmt.Sprintf("%d", m.stats.UDPCount))
 
-	summary := subtleStyle.Render("Load"+" ") + loadStr +
-		subtleStyle.Render("   Net"+" ") + rx + " " + tx +
-		subtleStyle.Render("   TCP"+" ") + valueStyle.Render(fmt.Sprintf("%d", m.stats.TCPCount)) +
-		subtleStyle.Render("  UDP"+" ") + valueStyle.Render(fmt.Sprintf("%d", m.stats.UDPCount))
-	lines = append(lines, summary)
+	switch {
+	case wide:
+		line1 := strings.Join([]string{
+			"  " + subtleStyle.Render(m.tr.T("Load")),
+			loadValue(m.stats.Load1),
+			loadValue(m.stats.Load5),
+			loadValue(m.stats.Load15),
+			"    " + subtleStyle.Render("TCP"),
+			tcp,
+			" " + subtleStyle.Render("UDP"),
+			udp,
+		}, " ")
+		line2 := "  " + subtleStyle.Render(strings.Repeat(" ", len(m.tr.T("Load"))+1)) + loadBar(m.stats.Load1) + "   " + loadBar(m.stats.Load5) + "   " + loadBar(m.stats.Load15)
+		line3 := "  " + subtleStyle.Render(strings.Repeat(" ", len(m.tr.T("Load"))+1)) + subtleStyle.Render("1m") + "    " + subtleStyle.Render("5m") + "    " + subtleStyle.Render("15m")
+		return strings.Join([]string{line1, line2, line3}, "\n")
+	case medium:
+		return strings.Join([]string{
+			"  " + subtleStyle.Render(m.tr.T("Load")) + " " + loadValue(m.stats.Load1) + " " + loadValue(m.stats.Load5) + " " + loadValue(m.stats.Load15),
+			"  " + subtleStyle.Render("TCP") + " " + tcp + "  " + subtleStyle.Render("UDP") + " " + udp,
+		}, "\n")
+	default:
+		rx := lipgloss.NewStyle().Foreground(CBrightGreen).Render("↓ " + formatBytes(m.stats.NetInSpeed) + "/s")
+		tx := lipgloss.NewStyle().Foreground(CPink).Render("↑ " + formatBytes(m.stats.NetOutSpeed) + "/s")
+		return strings.Join([]string{
+			"  " + subtleStyle.Render(m.tr.T("Load")) + " " + loadValue(m.stats.Load1) + " " + loadValue(m.stats.Load5) + " " + loadValue(m.stats.Load15) + "  " + rx + " " + tx,
+			"  " + subtleStyle.Render("TCP") + " " + tcp + "  " + subtleStyle.Render("UDP") + " " + udp,
+		}, "\n")
+	}
+}
 
-	// ── Interface table ──
+func (m Model) renderNetworkTrafficSection() string {
+	if m.width < 80 {
+		return ""
+	}
+
+	rx := lipgloss.NewStyle().Foreground(CBrightGreen).Render("↓ " + formatBytes(m.stats.NetInSpeed) + "/s")
+	tx := lipgloss.NewStyle().Foreground(CPink).Render("↑ " + formatBytes(m.stats.NetOutSpeed) + "/s")
+	dashCount := max(calcFullWidth(m.width)-18, 12)
+
+	lines := []string{
+		"  " + subtleStyle.Render("Traffic "+strings.Repeat("─", dashCount)),
+		"  " + subtleStyle.Render("Total") + "  " + rx + "  " + tx,
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderNetworkInterfaces() string {
 	ifaces := m.stats.Interfaces
 	if len(ifaces) == 0 {
-		return strings.Join(lines, "\n")
+		return ""
 	}
 
-	// Sort: active first, then physical > bridge > docker > veth
+	sorted := sortInterfaces(ifaces)
+	showTotal := m.width >= 120
+	compact := m.width < 80
+	showHeader := !compact
+	maxIdleVisible := 3
+	if compact {
+		maxIdleVisible = 1
+	}
+	if len(sorted) <= maxIdleVisible+2 {
+		maxIdleVisible = len(sorted)
+	}
+
+	greenDot := lipgloss.NewStyle().Foreground(COk).Render("●")
+	grayDot := lipgloss.NewStyle().Foreground(CMuted).Render("○")
+	activeStyle := lipgloss.NewStyle().Foreground(CText)
+	idleStyle := lipgloss.NewStyle().Foreground(CMuted)
+	warn := lipgloss.NewStyle().Foreground(CWarn)
+
+	ifaceW := 12
+	ipW := 16
+	rxW := 13
+	txW := 13
+	totalW := 12
+	if showTotal {
+		ifaceW = 14
+		ipW = 17
+		rxW = 14
+		txW = 14
+	}
+	if compact {
+		ifaceW = 10
+		ipW = 15
+	}
+
+	var lines []string
+	if showHeader {
+		headers := []string{
+			"  ",
+			padRight("IFACE", ifaceW+2, false),
+			padRight("IP", ipW, false),
+			padLeft("RX/s", rxW, false),
+			padLeft("TX/s", txW, false),
+		}
+		if showTotal {
+			headers = append(headers, padLeft("TOTAL RX", totalW, false), padLeft("TOTAL TX", totalW, false))
+		}
+		lines = append(lines, subtleStyle.Render(strings.Join(headers, "")))
+	}
+
+	idleTotal := 0
+	foldedCount := 0
+	var foldedRx, foldedTx uint64
+	for _, iface := range sorted {
+		isActive := iface.RxSpeed > 0 || iface.TxSpeed > 0
+		hasWarn := totalErrDrops(iface) > 0
+		if !isActive && !hasWarn {
+			idleTotal++
+			if idleTotal > maxIdleVisible && len(sorted) > maxIdleVisible+1 {
+				foldedCount++
+				foldedRx += iface.RxBytes
+				foldedTx += iface.TxBytes
+				continue
+			}
+		}
+
+		rowStyle := idleStyle
+		dot := grayDot
+		if isActive {
+			rowStyle = activeStyle
+			dot = greenDot
+		}
+
+		name := truncateIfaceName(iface.Name, ifaceW-2)
+		ip := iface.IPv4
+		if ip == "" {
+			ip = "—"
+		}
+		ipText := padRight(ip, ipW, false)
+		ipStyle := lipgloss.NewStyle().Foreground(CMuted)
+		if ip != "—" && !isPrivateIP(ip) {
+			ipStyle = lipgloss.NewStyle().Foreground(CInfo).Bold(true)
+		}
+
+		rxText := lipgloss.NewStyle().Foreground(CBrightGreen).Render("↓ " + padLeft(formatBytes(iface.RxSpeed)+"/s", rxW-2, false))
+		txText := lipgloss.NewStyle().Foreground(CPink).Render("↑ " + padLeft(formatBytes(iface.TxSpeed)+"/s", txW-2, false))
+		warnText := renderIfaceWarning(iface, compact)
+
+		if compact {
+			line := "  " + dot + " " + rowStyle.Render(padRight(name, ifaceW, false)) + ipStyle.Render(ipText) + " " + rxText + " " + txText
+			if warnText != "" {
+				line += " " + warn.Render(warnText)
+			}
+			lines = append(lines, line)
+			continue
+		}
+
+		parts := []string{
+			"  " + dot + " ",
+			rowStyle.Render(padRight(name, ifaceW, false)),
+			ipStyle.Render(ipText),
+			rxText,
+			" ",
+			txText,
+		}
+		if showTotal {
+			parts = append(parts,
+				" "+rowStyle.Render(padLeft(formatBytes(iface.RxBytes), totalW, false)),
+				" "+rowStyle.Render(padLeft(formatBytes(iface.TxBytes), totalW, false)),
+			)
+		}
+		line := strings.Join(parts, "")
+		if warnText != "" {
+			line += "  " + warn.Render(warnText)
+		}
+		lines = append(lines, line)
+	}
+
+	if foldedCount > 0 {
+		label := fmt.Sprintf("  %s %d %s", grayDot, foldedCount, m.tr.T("idle interfaces"))
+		if compact {
+			lines = append(lines, idleStyle.Render(label))
+		} else if showTotal {
+			lines = append(lines, idleStyle.Render(label+padLeft("", max(0, ifaceW+ipW+rxW+txW-15), false)+padLeft(formatBytes(foldedRx), totalW+1, false)+padLeft(formatBytes(foldedTx), totalW+1, false)))
+		} else {
+			lines = append(lines, idleStyle.Render(label))
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func sortInterfaces(ifaces []vminfo.InterfaceIO) []vminfo.InterfaceIO {
 	sorted := make([]vminfo.InterfaceIO, len(ifaces))
 	copy(sorted, ifaces)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		aActive := sorted[i].RxSpeed > 0 || sorted[i].TxSpeed > 0
 		bActive := sorted[j].RxSpeed > 0 || sorted[j].TxSpeed > 0
+		aHighlight := aActive || totalErrDrops(sorted[i]) > 0
+		bHighlight := bActive || totalErrDrops(sorted[j]) > 0
+		if aHighlight != bHighlight {
+			return aHighlight
+		}
 		if aActive != bActive {
 			return aActive
 		}
@@ -409,108 +607,82 @@ func (m Model) renderNetworkContent() string {
 		}
 		return sorted[i].Name < sorted[j].Name
 	})
+	return sorted
+}
 
-	wide := m.width >= 100
-	narrow := m.width < 80
-
-	// Column header
-	if !narrow {
-		colHdr := subtleStyle.Render("  IFACE") + strings.Repeat(" ", 7) +
-			subtleStyle.Render("IP") + strings.Repeat(" ", 15) +
-			subtleStyle.Render("RX/s") + strings.Repeat(" ", 10) +
-			subtleStyle.Render("TX/s") + strings.Repeat(" ", 10)
-		if wide {
-			colHdr += subtleStyle.Render("TOTAL RX") + strings.Repeat(" ", 4) +
-				subtleStyle.Render("TOTAL TX")
-		}
-		lines = append(lines, "", colHdr)
+func loadColor(load float64, cores uint32) lipgloss.Color {
+	if cores == 0 {
+		cores = 1
 	}
-
-	// Styles
-	greenDot := lipgloss.NewStyle().Foreground(COk).Render("\u25cf")   // ●
-	grayDot := lipgloss.NewStyle().Foreground(CMuted).Render("\u25cb") // ○
-
-	// Render rows
-	idleCount := 0
-	var idleTotalRx, idleTotalTx uint64
-	for _, iface := range sorted {
-		isActive := iface.RxSpeed > 0 || iface.TxSpeed > 0
-
-		// Fold idle interfaces if too many
-		if !isActive && idleCount >= 3 && len(sorted) > 5 {
-			idleCount++
-			idleTotalRx += iface.RxBytes
-			idleTotalTx += iface.TxBytes
-			continue
-		}
-
-		dot := grayDot
-		rowStyle := lipgloss.NewStyle().Foreground(CMuted)
-		if isActive {
-			dot = greenDot
-			rowStyle = lipgloss.NewStyle().Foreground(CText)
-		}
-
-		name := truncateIfaceName(iface.Name, 12)
-		ip := iface.IPv4
-		if ip == "" {
-			ip = "\u2014" // —
-		}
-
-		// IP color: public blue bold, private gray
-		ipStyle := lipgloss.NewStyle().Foreground(CMuted)
-		if ip != "\u2014" && !isPrivateIP(ip) {
-			ipStyle = lipgloss.NewStyle().Foreground(CInfo).Bold(true)
-		}
-
-		if narrow {
-			// Compact: dot + name + ip + speed
-			row := "  " + dot + " " + rowStyle.Render(fmt.Sprintf("%-10s", name)) + " " +
-				ipStyle.Render(fmt.Sprintf("%-15s", ip)) +
-				" " + lipgloss.NewStyle().Foreground(CBrightGreen).Render(fmt.Sprintf("\u2193%s/s", formatBytes(iface.RxSpeed))) +
-				" " + lipgloss.NewStyle().Foreground(CPink).Render(fmt.Sprintf("\u2191%s/s", formatBytes(iface.TxSpeed)))
-			lines = append(lines, row)
-		} else {
-			// Table: fixed-width columns
-			row := "  " + dot + " " + rowStyle.Render(fmt.Sprintf("%-12s", name)) +
-				ipStyle.Render(fmt.Sprintf("%-16s", ip)) +
-				rowStyle.Render(fmt.Sprintf("%13s/s", formatBytes(iface.RxSpeed))) +
-				rowStyle.Render(fmt.Sprintf("%13s/s", formatBytes(iface.TxSpeed)))
-			if wide {
-				row += rowStyle.Render(fmt.Sprintf("%12s", formatBytes(iface.RxBytes))) +
-					rowStyle.Render(fmt.Sprintf("%12s", formatBytes(iface.TxBytes)))
-			}
-			lines = append(lines, row)
-		}
-
-		if !isActive {
-			idleCount++
-		}
+	ratio := load / float64(cores)
+	switch {
+	case ratio >= 1.0:
+		return CCritical
+	case ratio >= 0.8:
+		return CAlert
+	case ratio >= 0.5:
+		return CWarn
+	default:
+		return COk
 	}
+}
 
-	// Collapsed idle summary
-	totalIdle := 0
-	for _, iface := range sorted {
-		if iface.RxSpeed == 0 && iface.TxSpeed == 0 {
-			totalIdle++
-		}
+func loadMiniBar(load float64, cores uint32) rune {
+	if cores == 0 {
+		cores = 1
 	}
-	maxShowIdle := 3
-	if len(sorted) <= 5 {
-		maxShowIdle = totalIdle
+	ratio := load / float64(cores)
+	switch {
+	case ratio >= 1.0:
+		return '█'
+	case ratio >= 0.8:
+		return '▆'
+	case ratio >= 0.5:
+		return '▄'
+	default:
+		return '▁'
 	}
-	foldedCount := totalIdle - min(totalIdle, maxShowIdle)
-	if foldedCount > 0 {
-		summary := "  " + grayDot + " " + lipgloss.NewStyle().Foreground(CMuted).Render(
-			fmt.Sprintf("%d idle interfaces", foldedCount))
-		if wide && (idleTotalRx > 0 || idleTotalTx > 0) {
-			summary += lipgloss.NewStyle().Foreground(CMuted).Render(
-				fmt.Sprintf("%12s%12s", formatBytes(idleTotalRx), formatBytes(idleTotalTx)))
-		}
-		lines = append(lines, summary)
-	}
+}
 
-	return strings.Join(lines, "\n")
+func totalErrDrops(iface vminfo.InterfaceIO) uint64 {
+	return iface.RxErrors + iface.TxErrors + iface.RxDrops + iface.TxDrops
+}
+
+func renderIfaceWarning(iface vminfo.InterfaceIO, compact bool) string {
+	errs := iface.RxErrors + iface.TxErrors
+	drops := iface.RxDrops + iface.TxDrops
+	if errs == 0 && drops == 0 {
+		return ""
+	}
+	if compact {
+		return fmt.Sprintf("⚠%d/%d", errs, drops)
+	}
+	return fmt.Sprintf("⚠ %d errs %d drops", errs, drops)
+}
+
+func padRight(value string, width int, styled bool) string {
+	if width <= 0 {
+		return ""
+	}
+	if styled {
+		return lipgloss.NewStyle().Width(width).Render(value)
+	}
+	runes := []rune(value)
+	if len(runes) >= width {
+		return string(runes[:width])
+	}
+	return value + strings.Repeat(" ", width-len(runes))
+}
+
+func padLeft(value string, width int, styled bool) string {
+	if width <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) >= width {
+		return string(runes[len(runes)-width:])
+	}
+	return strings.Repeat(" ", width-len(runes)) + value
 }
 
 // ── Progress Bar ─────────────────────────────────────────────────────

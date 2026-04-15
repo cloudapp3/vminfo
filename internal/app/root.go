@@ -7,6 +7,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"sort"
@@ -16,11 +18,11 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/VPSMarket/vminfo"
-	"github.com/VPSMarket/vminfo/internal/collector"
-	"github.com/VPSMarket/vminfo/internal/i18n"
-	"github.com/VPSMarket/vminfo/internal/tui"
-	"github.com/VPSMarket/vminfo/internal/web"
+	"github.com/cloudapp3/vminfo"
+	"github.com/cloudapp3/vminfo/internal/collector"
+	"github.com/cloudapp3/vminfo/internal/i18n"
+	"github.com/cloudapp3/vminfo/internal/tui"
+	"github.com/cloudapp3/vminfo/internal/web"
 )
 
 var ErrUsage = errors.New("usage")
@@ -38,7 +40,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Pre-scan global flags (--lang, --web, --port, --bind, --tui, --interval, --silent)
 	langFlag := ""
 	webMode := false
-	webPort := 9990
+	webPort := 20021
 	webBind := "127.0.0.1"
 	tuiMode := false
 	silent := false
@@ -134,19 +136,25 @@ func runWeb(ctx context.Context, stdout, stderr io.Writer, tr *i18n.Translator, 
 	go col.Start(ctx)
 	defer col.Stop()
 
-	// Wait for first collection
-	time.Sleep(200 * time.Millisecond)
+	// Wait briefly for the first snapshot so startup output can show useful
+	// interface addresses instead of only the wildcard bind address.
+	snap := waitForCollectorSnapshot(ctx, col, 2*time.Second)
 
 	// Start web server
 	srv := web.NewServer(addr, col)
 	go func() {
 		if err := srv.Start(); err != nil {
+			if errors.Is(err, http.ErrServerClosed) {
+				return
+			}
 			fmt.Fprintf(stderr, "web server error: %v\n", err)
 		}
 	}()
 
 	if !silent {
-		fmt.Fprintf(stdout, "Web dashboard: http://%s\n", addr)
+		for _, line := range webDashboardListenLines(addr, snap) {
+			fmt.Fprintln(stdout, line)
+		}
 	}
 
 	if withTUI {
@@ -170,6 +178,169 @@ func runWeb(ctx context.Context, stdout, stderr io.Writer, tr *i18n.Translator, 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+func waitForCollectorSnapshot(ctx context.Context, col *collector.Collector, timeout time.Duration) *collector.Snapshot {
+	if snap := col.Latest(); snap != nil {
+		return snap
+	}
+	if timeout <= 0 {
+		return nil
+	}
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return col.Latest()
+		case <-time.After(50 * time.Millisecond):
+			if snap := col.Latest(); snap != nil {
+				return snap
+			}
+		}
+	}
+	return col.Latest()
+}
+
+func webDashboardListenLines(addr string, snap *collector.Snapshot) []string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return []string{fmt.Sprintf("Web dashboard: http://%s", addr)}
+	}
+	if !isWildcardBind(host) {
+		return []string{fmt.Sprintf("Web dashboard: http://%s", net.JoinHostPort(host, port))}
+	}
+
+	lines := []string{"Web dashboard:"}
+	lines = append(lines, fmt.Sprintf("  %-6s %s", "Local", "http://"+net.JoinHostPort("127.0.0.1", port)))
+
+	if snap == nil {
+		return lines
+	}
+
+	publicIP := bestInterfaceIPv4(snap.Network.Interfaces, true)
+	if publicIP != "" {
+		lines = append(lines, fmt.Sprintf("  %-6s %s", "Public", "http://"+net.JoinHostPort(publicIP, port)))
+	}
+
+	lanIP := bestInterfaceIPv4(snap.Network.Interfaces, false)
+	if lanIP != "" && lanIP != publicIP {
+		lines = append(lines, fmt.Sprintf("  %-6s %s", "LAN", "http://"+net.JoinHostPort(lanIP, port)))
+	}
+
+	return lines
+}
+
+func isWildcardBind(host string) bool {
+	switch strings.TrimSpace(host) {
+	case "", "0.0.0.0", "::", "[::]":
+		return true
+	default:
+		return false
+	}
+}
+
+func bestInterfaceIPv4(ifaces []collector.NetInterface, wantPublic bool) string {
+	if len(ifaces) == 0 {
+		return ""
+	}
+
+	type candidate struct {
+		name string
+		ip   string
+		rx   uint64
+		tx   uint64
+	}
+
+	items := make([]candidate, 0, len(ifaces))
+	for _, iface := range ifaces {
+		ip := strings.TrimSpace(iface.IPv4)
+		if ip == "" || isLoopbackIP(ip) {
+			continue
+		}
+		isPublic := !isPrivateIP(ip)
+		if wantPublic != isPublic {
+			continue
+		}
+		if !wantPublic && isVirtualIface(iface.Name) {
+			continue
+		}
+		items = append(items, candidate{
+			name: iface.Name,
+			ip:   ip,
+			rx:   iface.DownloadSec,
+			tx:   iface.UploadSec,
+		})
+	}
+
+	if len(items) == 0 {
+		return ""
+	}
+
+	sort.SliceStable(items, func(i, j int) bool {
+		a, b := items[i], items[j]
+		aActive := a.rx > 0 || a.tx > 0
+		bActive := b.rx > 0 || b.tx > 0
+		if aActive != bActive {
+			return aActive
+		}
+		aPri := ifaceDisplayPriority(a.name)
+		bPri := ifaceDisplayPriority(b.name)
+		if aPri != bPri {
+			return aPri < bPri
+		}
+		return a.name < b.name
+	})
+
+	return items[0].ip
+}
+
+func ifaceDisplayPriority(name string) int {
+	switch {
+	case strings.HasPrefix(name, "eth"), strings.HasPrefix(name, "en"):
+		return 0
+	case strings.HasPrefix(name, "wl"):
+		return 1
+	case strings.HasPrefix(name, "bond"):
+		return 2
+	case strings.HasPrefix(name, "br"):
+		return 4
+	case strings.HasPrefix(name, "docker"):
+		return 5
+	case strings.HasPrefix(name, "veth"), strings.HasPrefix(name, "tun"), strings.HasPrefix(name, "tap"):
+		return 6
+	case strings.HasPrefix(name, "lo"):
+		return 7
+	default:
+		return 3
+	}
+}
+
+func isVirtualIface(name string) bool {
+	return ifaceDisplayPriority(name) >= 4
+}
+
+func isPrivateIP(ip string) bool {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+	privateNets := []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}
+	for _, cidr := range privateNets {
+		_, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			continue
+		}
+		if network.Contains(parsed) {
+			return true
+		}
+	}
+	return false
+}
+
+func isLoopbackIP(ip string) bool {
+	parsed := net.ParseIP(ip)
+	return parsed != nil && parsed.IsLoopback()
 }
 
 func runInfo(ctx context.Context, w io.Writer, tr *i18n.Translator) error {
@@ -459,7 +630,7 @@ func helpText(tr *i18n.Translator) string {
 		"  vminfo info            " + tr.T("start TUI (alias)"),
 		"  vminfo --web           " + tr.T("start web dashboard"),
 		"  vminfo --web --tui     " + tr.T("start web + TUI"),
-		"  vminfo --web --port N  " + tr.T("web dashboard on port N (default 9990)"),
+		"  vminfo --web --port N  " + tr.T("web dashboard on port N (default 20021)"),
 		"  vminfo version         " + tr.T("show app version"),
 		"  vminfo version --json  " + tr.T("show app metadata as JSON"),
 		"  vminfo summary         " + tr.T("collect one snapshot"),
@@ -475,7 +646,7 @@ func helpText(tr *i18n.Translator) string {
 		tr.T("Global options:"),
 		"  --lang <code>          " + tr.T("force language: en|zh|de|es|fr|ja|ko|pt|ru"),
 		"  --web                  " + tr.T("enable web dashboard"),
-		"  --port <N>             " + tr.T("web dashboard port (default 9990)"),
+		"  --port <N>             " + tr.T("web dashboard port (default 20021)"),
 		"  --bind <addr>          " + tr.T("bind address (default 127.0.0.1, use 0.0.0.0 for all)"),
 		"  --tui                  " + tr.T("start TUI alongside --web"),
 		"  --silent, -s           " + tr.T("suppress informational output"),

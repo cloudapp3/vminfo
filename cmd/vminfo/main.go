@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/VPSMarket/vminfo/internal/app"
+	"github.com/cloudapp3/vminfo/internal/app"
 )
 
 func main() {

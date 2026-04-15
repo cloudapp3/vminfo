@@ -11,7 +11,6 @@
   "Collecting...": "采集中...",
   "No data": "无数据",
   "Terminal too narrow, showing compact view. Resize for full dashboard.": "终端过窄，显示紧凑视图。请调整终端大小。",
-
   "OS": "操作系统",
   "Kernel": "内核",
   "Arch": "架构",
@@ -22,13 +21,11 @@
   "Mem": "内存",
   "Swap": "交换区",
   "Disk": "磁盘",
-
   "cur": "当前",
   "avg": "平均",
   "max": "最大",
   "Cores": "核心",
   "Load": "负载",
-
   "ONLINE": "运行中",
   "PAUSED": "已暂停",
   "ERROR": "错误",
@@ -37,11 +34,9 @@
   "OVERVIEW": "概览",
   "PROCS": "进程",
   "MAIN": "主视图",
-
   "Interval:": "间隔:",
   "Sort:": "排序:",
   "Updated:": "更新:",
-
   "paused": "已暂停",
   "resumed": "已恢复",
   "refreshing...": "刷新中...",
@@ -63,7 +58,6 @@
   "sent SIGTERM to PID %s": "已发送 SIGTERM 至 PID %s",
   "kill failed: %s": "终止失败: %s",
   "filter: %s": "过滤: %s",
-
   "PID": "PID",
   "CPU%": "CPU%",
   "MEM%": "MEM%",
@@ -72,18 +66,15 @@
   "NAME": "名称",
   "STATE": "状态",
   "PPID": "PPID",
-
   "PID:": "PID:",
   "Name:": "名称:",
   "State:": "状态:",
   "CPU:": "CPU:",
   "Mem:": "内存:",
   "RSS:": "RSS:",
-
   "Send SIGTERM to PID %d (%s)?": "发送 SIGTERM 至 PID %d (%s)?",
   "Enter / y to confirm": "按 Enter / y 确认",
   "Esc / n to cancel": "按 Esc / n 取消",
-
   "quit": "退出",
   "toggle help": "切换帮助",
   "pause/resume refresh": "暂停/恢复刷新",
@@ -97,7 +88,6 @@
   "kill selected process": "终止选中进程",
   "confirm kill": "确认终止",
   "cancel": "取消",
-
   "view": "视图",
   "select": "选择",
   "sort": "排序",
@@ -109,17 +99,13 @@
   "exit": "退出",
   "interval": "间隔",
   "confirm": "确认",
-
   "▲ %d more above": "▲ 上方还有 %d 条",
   "▼ %d more below": "▼ 下方还有 %d 条",
   "filter: %s  (%d matches)": "过滤: %s  (%d 条匹配)",
   "%d cores": "%d 核心",
-
   "MHz": "MHz",
   "°C": "°C",
-
   "Error: %s": "错误: %s",
-
   "Usage:": "用法:",
   "start TUI": "启动 TUI",
   "start TUI (alias)": "启动 TUI (别名)",
@@ -146,7 +132,6 @@
   "sort key: cpu|mem|pid|name": "排序键: cpu|mem|pid|name",
   "write version metadata as JSON": "以 JSON 格式输出版本元数据",
   "unknown command: %s": "未知命令: %s",
-
   "Host Summary": "主机摘要",
   "Host     :": "主机     :",
   "OS       :": "操作系统 :",
@@ -163,9 +148,10 @@
   " used / ": " 已用 / ",
   " total": " 总计",
   "sent SIGTERM to PID %d": "已发送 SIGTERM 至 PID %d",
-
   "commit:": "提交:",
   "built:": "构建:",
   "channel:": "渠道:",
-  "schema:": "协议:"
+  "schema:": "协议:",
+  "Procs": "进程数",
+  "idle interfaces": "空闲接口"
 }

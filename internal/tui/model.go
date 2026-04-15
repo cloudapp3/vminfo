@@ -14,8 +14,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/VPSMarket/vminfo"
-	"github.com/VPSMarket/vminfo/internal/i18n"
+	"github.com/cloudapp3/vminfo"
+	"github.com/cloudapp3/vminfo/internal/i18n"
 )
 
 const (

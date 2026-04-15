@@ -1,4 +1,4 @@
-module github.com/VPSMarket/vminfo
+module github.com/cloudapp3/vminfo
 
 go 1.25
 

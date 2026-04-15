@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/VPSMarket/vminfo"
+	"github.com/cloudapp3/vminfo"
 )
 
 // Snapshot represents a complete system state at a point in time.
@@ -87,6 +87,10 @@ type NetInterface struct {
 	IPv4        string `json:"ipv4,omitempty"`
 	RxBytes     uint64 `json:"rx_bytes,omitempty"`
 	TxBytes     uint64 `json:"tx_bytes,omitempty"`
+	RxErrors    uint64 `json:"rx_errors,omitempty"`
+	TxErrors    uint64 `json:"tx_errors,omitempty"`
+	RxDrops     uint64 `json:"rx_drops,omitempty"`
+	TxDrops     uint64 `json:"tx_drops,omitempty"`
 }
 
 type LoadInfo struct {
@@ -167,6 +171,10 @@ func BuildSnapshot(
 			IPv4:        iface.IPv4,
 			RxBytes:     iface.RxBytes,
 			TxBytes:     iface.TxBytes,
+			RxErrors:    iface.RxErrors,
+			TxErrors:    iface.TxErrors,
+			RxDrops:     iface.RxDrops,
+			TxDrops:     iface.TxDrops,
 		})
 	}
 

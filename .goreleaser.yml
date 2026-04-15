@@ -16,10 +16,10 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/VPSMarket/vminfo.Version={{.Version}}
-      - -X github.com/VPSMarket/vminfo.Commit={{.Commit}}
-      - -X github.com/VPSMarket/vminfo.BuildTime={{.Date}}
-      - -X github.com/VPSMarket/vminfo.Channel=stable
+      - -X github.com/cloudapp3/vminfo.Version={{.Version}}
+      - -X github.com/cloudapp3/vminfo.Commit={{.Commit}}
+      - -X github.com/cloudapp3/vminfo.BuildTime={{.Date}}
+      - -X github.com/cloudapp3/vminfo.Channel=stable
     goos:
       - linux
       - darwin
@@ -45,7 +45,7 @@ archives:
     files:
       - LICENSE
       - README.md
-      - CHANGELOG.md
+      - docs/CHANGELOG.md
 
 checksum:
   name_template: checksums.txt
@@ -63,7 +63,7 @@ changelog:
 
 release:
   github:
-    owner: VPSMarket
+    owner: cloudapp3
     name: vminfo
   draft: false
   prerelease: auto
@@ -72,9 +72,9 @@ release:
 nfpms:
   - id: packages
     package_name: vminfo
-    maintainer: VPSMarket
+    maintainer: cloudapp3
     description: Host runtime information toolkit
-    homepage: https://github.com/VPSMarket/vminfo
+    homepage: https://github.com/cloudapp3/vminfo
     license: MIT
     formats:
       - deb
