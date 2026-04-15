@@ -37,6 +37,28 @@ vminfo summary --json
 
 That's it. No config files, no daemons, no setup.
 
+## Install from GitHub Release
+
+### One-line install (Linux/macOS)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash
+```
+
+By default, the script installs `vminfo` into `~/.local/bin`.
+
+### Install a specific version
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash -s -- --version v0.1.0
+```
+
+### Install to a custom directory
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash -s -- --dir /usr/local/bin
+```
+
 ## What it does
 
 vminfo gives you instant visibility into any host:

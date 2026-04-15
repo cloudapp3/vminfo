@@ -37,6 +37,28 @@ vminfo summary --json
 
 无需配置文件，无需守护进程，装完即用。
 
+## 从 GitHub Release 安装
+
+### 一键安装（Linux/macOS）
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash
+```
+
+默认会把 `vminfo` 安装到 `~/.local/bin`。
+
+### 安装指定版本
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash -s -- --version v0.1.0
+```
+
+### 安装到指定目录
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash -s -- --dir /usr/local/bin
+```
+
 ## 它能做什么
 
 vminfo 让你对任意主机一目了然：
