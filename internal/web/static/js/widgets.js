@@ -24,20 +24,25 @@ function formatBytesPerSec(bytes) {
 // --- Progress Bar ---
 function renderProgressBar(containerId, label, percent, used, total) {
     var container = document.getElementById(containerId);
-    var barWidth = 200;
-    var color = thresholdColor(percent);
-
-    var html = '<span class="progress-label">' + label + '</span>' +
-        '<span class="progress-track" style="width:' + barWidth + 'px">' +
-        '<span class="progress-fill" style="width:' + percent + '%;background:' + color + '"></span>' +
-        '</span>' +
-        '<span class="progress-pct" style="color:' + color + '">' + percent.toFixed(1) + '%</span>';
+    var safePercent = Math.max(0, Math.min(100, percent || 0));
+    var color = thresholdColor(safePercent);
+    var detailHTML = '<span class="progress-detail progress-detail-empty"></span>';
 
     if (used !== undefined && total !== undefined) {
-        html += '<div class="progress-detail">' + formatBytes(used) + ' / ' + formatBytes(total) + '</div>';
+        detailHTML = '<span class="progress-detail">' + formatBytes(used) + ' / ' + formatBytes(total) + '</span>';
     }
 
-    container.innerHTML = html;
+    container.innerHTML =
+        '<div class="progress-head">' +
+            '<span class="progress-label">' + label + '</span>' +
+            '<span class="progress-pct" style="color:' + color + '">' + safePercent.toFixed(1) + '%</span>' +
+        '</div>' +
+        '<div class="progress-main">' +
+            '<div class="progress-track">' +
+                '<div class="progress-fill" style="width:' + safePercent + '%;background:' + color + '"></div>' +
+            '</div>' +
+            detailHTML +
+        '</div>';
 }
 
 // --- Sparkline (Canvas) ---
@@ -103,10 +108,7 @@ function renderSparkline(canvasId, data, maxPoints) {
 // --- Cores Bar ---
 function renderCores(containerId, perCore) {
     var container = document.getElementById(containerId);
-    var maxHeight = 32;
-    var sum = 0;
-    for (var i = 0; i < perCore.length; i++) sum += perCore[i];
-    var avg = sum / perCore.length;
+    var maxHeight = 54;
 
     var html = '';
     for (var i = 0; i < perCore.length; i++) {
@@ -119,11 +121,6 @@ function renderCores(containerId, perCore) {
             '<span class="core-label">' + i + '</span>' +
             '</div>';
     }
-
-    html += '<div class="core-col" style="margin-left:12px">' +
-        '<span class="core-pct color-muted">avg</span>' +
-        '<span class="core-pct" style="color:' + thresholdColor(avg) + '">' + avg.toFixed(1) + '%</span>' +
-        '</div>';
 
     container.innerHTML = html;
 }

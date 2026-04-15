@@ -42,8 +42,12 @@ type diskIOSample struct {
 }
 
 type netIfaceSample struct {
-	in  uint64
-	out uint64
+	in       uint64
+	out      uint64
+	rxErrors uint64
+	txErrors uint64
+	rxDrops  uint64
+	txDrops  uint64
 }
 
 // CollectStatic reads one set of static host details.
@@ -452,7 +456,14 @@ func readNetIfaceSamples(ctx context.Context) (map[string]netIfaceSample, error)
 		if c.Name == "lo" {
 			continue
 		}
-		result[c.Name] = netIfaceSample{in: c.BytesRecv, out: c.BytesSent}
+		result[c.Name] = netIfaceSample{
+			in:       c.BytesRecv,
+			out:      c.BytesSent,
+			rxErrors: c.Errin,
+			txErrors: c.Errout,
+			rxDrops:  c.Dropin,
+			txDrops:  c.Dropout,
+		}
 	}
 	return result, nil
 }
@@ -492,12 +503,16 @@ func calcIfaceSpeeds(start, end map[string]netIfaceSample, addrs map[string]stri
 		rxSpeed := uint64(float64(diffUint64(e.in, s.in)) / seconds)
 		txSpeed := uint64(float64(diffUint64(e.out, s.out)) / seconds)
 		result = append(result, InterfaceIO{
-			Name:    name,
-			RxSpeed: rxSpeed,
-			TxSpeed: txSpeed,
-			IPv4:    addrs[name],
-			RxBytes: e.in,
-			TxBytes: e.out,
+			Name:     name,
+			RxSpeed:  rxSpeed,
+			TxSpeed:  txSpeed,
+			IPv4:     addrs[name],
+			RxBytes:  e.in,
+			TxBytes:  e.out,
+			RxErrors: e.rxErrors,
+			TxErrors: e.txErrors,
+			RxDrops:  e.rxDrops,
+			TxDrops:  e.txDrops,
 		})
 	}
 	return result

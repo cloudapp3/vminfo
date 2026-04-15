@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/VPSMarket/vminfo"
+	"github.com/cloudapp3/vminfo"
 )
 
 const (

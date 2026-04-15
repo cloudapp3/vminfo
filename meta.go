@@ -5,7 +5,7 @@ import "strings"
 const (
 	AppName              = "vminfo"
 	DefaultDescription   = "Host runtime information toolkit"
-	DefaultRepositoryURL = "https://github.com/VPSMarket/vminfo"
+	DefaultRepositoryURL = "https://github.com/cloudapp3/vminfo"
 	DefaultHomepageURL   = DefaultRepositoryURL
 	DefaultSchemaVersion = "v1"
 )

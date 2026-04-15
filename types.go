@@ -74,12 +74,16 @@ type TempReading struct {
 
 // InterfaceIO holds per-interface network I/O stats.
 type InterfaceIO struct {
-	Name    string `json:"name"`
-	RxSpeed uint64 `json:"rx_speed,omitempty"`
-	TxSpeed uint64 `json:"tx_speed,omitempty"`
-	IPv4    string `json:"ipv4,omitempty"`
-	RxBytes uint64 `json:"rx_bytes,omitempty"`
-	TxBytes uint64 `json:"tx_bytes,omitempty"`
+	Name     string `json:"name"`
+	RxSpeed  uint64 `json:"rx_speed,omitempty"`
+	TxSpeed  uint64 `json:"tx_speed,omitempty"`
+	IPv4     string `json:"ipv4,omitempty"`
+	RxBytes  uint64 `json:"rx_bytes,omitempty"`
+	TxBytes  uint64 `json:"tx_bytes,omitempty"`
+	RxErrors uint64 `json:"rx_errors,omitempty"`
+	TxErrors uint64 `json:"tx_errors,omitempty"`
+	RxDrops  uint64 `json:"rx_drops,omitempty"`
+	TxDrops  uint64 `json:"tx_drops,omitempty"`
 }
 
 // Snapshot combines static host metadata with sampled runtime metrics.
