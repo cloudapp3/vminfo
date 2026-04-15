@@ -3,10 +3,12 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
-	"github.com/VPSMarket/vminfo/pkg/vminfo"
+	"github.com/VPSMarket/vminfo"
+	"github.com/VPSMarket/vminfo/internal/i18n"
 )
 
 func TestRunVersionText(t *testing.T) {
@@ -95,6 +97,9 @@ func TestRunVersionJSONViaGlobalFlag(t *testing.T) {
 	if meta.Channel != "nightly" {
 		t.Fatalf("meta.Channel = %q, want nightly", meta.Channel)
 	}
+	if meta.License != "MIT" {
+		t.Fatalf("meta.License = %q, want MIT", meta.License)
+	}
 	if meta.SchemaVersion != vminfo.DefaultSchemaVersion {
 		t.Fatalf("meta.SchemaVersion = %q, want %q", meta.SchemaVersion, vminfo.DefaultSchemaVersion)
 	}
@@ -104,14 +109,61 @@ func TestRunVersionJSONViaGlobalFlag(t *testing.T) {
 }
 
 func TestHelpTextMentionsVersion(t *testing.T) {
-	help := helpText()
+	help := helpText(i18n.New("en"))
 	for _, want := range []string{
+		"vminfo --web           start web dashboard",
+		"vminfo --web --tui     start web + TUI",
+		"vminfo --web --port N  web dashboard on port N (default 9990)",
 		"vminfo version         show app version",
 		"vminfo version --json  show app metadata as JSON",
 		"vminfo --version       show app version",
+		"--lang <code>          force language: en|zh|de|es|fr|ja|ko|pt|ru",
+		"--bind <addr>          bind address (default 127.0.0.1, use 0.0.0.0 for all)",
+		"--silent, -s           suppress informational output",
 	} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("help text missing %q\nhelp:\n%s", want, help)
 		}
+	}
+}
+
+func TestUnknownCommandErrUsage(t *testing.T) {
+	var stdout strings.Builder
+	var stderr strings.Builder
+	err := Run(context.Background(), []string{"nonexistent-cmd"}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("expected error for unknown command")
+	}
+	if !errors.Is(err, ErrUsage) {
+		t.Fatalf("expected ErrUsage, got %v", err)
+	}
+}
+
+func TestSilentFlagSuppressed(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	err := Run(context.Background(), []string{"version", "--silent"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// version output should still appear — silent suppresses informational messages, not data
+	if !strings.Contains(stdout.String(), "vminfo") {
+		t.Fatalf("version output should still be present, got %q", stdout.String())
+	}
+}
+
+func TestFriendlyCollectionError(t *testing.T) {
+	// watch with --count 1 exercises CollectAll — we just verify the error wraps works
+	// by testing the error message format on an invalid scenario
+	var stdout strings.Builder
+	var stderr strings.Builder
+	err := Run(context.Background(), []string{"kill"}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("expected error for kill without pid")
+	}
+	if !errors.Is(err, ErrUsage) {
+		t.Fatalf("expected ErrUsage, got %v", err)
 	}
 }

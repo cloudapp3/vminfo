@@ -1,124 +1,164 @@
 # vminfo
 
-`vminfo` 是一个独立的主机运行时信息工具，目标形态是：
+> One command to see everything running on your machine — CPU, memory, disk, network, processes — in a polished terminal UI, JSON, or browser dashboard.
 
-- 可嵌入的 Go 库
-- 正式可用的 CLI
-- 默认进入 TUI
-- 支持单次摘要、持续观察、进程列表与 Linux `SIGTERM`
+[![CI](https://github.com/VPSMarket/vminfo/actions/workflows/ci.yml/badge.svg)](https://github.com/VPSMarket/vminfo/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/VPSMarket/vminfo.svg)](https://pkg.go.dev/github.com/VPSMarket/vminfo)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## 命令
+中文说明：[README.zh-CN.md](README.zh-CN.md)
+
+## Demo
+
+![vminfo demo](docs/assets/tui-demo.gif)
+
+![vminfo overview](docs/assets/tui-overview.png)
+
+## Quick start
 
 ```bash
-vminfo                 # 默认进入 TUI
-vminfo info            # TUI 别名
-vminfo version         # 版本信息
-vminfo version --json  # 应用元数据 JSON
-vminfo summary         # 单次采样
+# 1. Install
+go install github.com/VPSMarket/vminfo/cmd/vminfo@latest
+
+# 2. Run — interactive TUI
+vminfo
+
+# 3. Or get a JSON snapshot for scripting
 vminfo summary --json
-vminfo watch           # 持续输出快照
-vminfo watch --json    # JSON Lines
-vminfo watch --count 1 # 仅输出一次，便于脚本验证
-vminfo ps              # 进程列表
-vminfo ps --json
-vminfo kill <pid>      # Linux: 发送 SIGTERM
-vminfo --version       # 版本信息快捷方式
 ```
 
-## 当前状态
+That's it. No config files, no daemons, no setup.
 
-当前仓库已完成：
+## What it does
 
-- 初始化独立 Go module
-- 静态信息与动态指标采集
-- 默认 `vminfo` TUI
-- `summary / watch / ps / kill` 非 TUI CLI
-- `version / --version` 与应用元数据输出
-- Linux-only `ps / kill`
+vminfo gives you instant visibility into any host:
 
-## App metadata
+- **TUI** — full-screen, live-updating terminal dashboard with overview and process views
+- **JSON** — machine-readable output for scripts, CI, monitoring pipelines
+- **Web dashboard** — browser-based UI with REST and WebSocket endpoints (`vminfo --web`)
+- **Go library** — import `github.com/VPSMarket/vminfo` and embed collection in your own tools
 
-`vminfo version --json` 会输出应用自身元数据，例如：
+Collected metrics: CPU (per-core), memory, swap, disk, disk I/O, network, load, TCP/UDP counts, process list, temperatures, uptime, and host metadata.
 
-```json
-{
-  "name": "vminfo",
-  "version": "dev",
-  "channel": "dev",
-  "repository": "https://github.com/VPSMarket/vminfo",
-  "homepage": "https://github.com/VPSMarket/vminfo",
-  "description": "Host runtime information toolkit",
-  "schema_version": "v1"
+## Commands
+
+```bash
+vminfo                 # launch TUI
+vminfo info            # TUI alias
+vminfo summary         # one runtime snapshot (text)
+vminfo summary --json  # one runtime snapshot (JSON)
+vminfo watch           # stream snapshots continuously
+vminfo watch --json    # stream JSON lines
+vminfo watch --count 1 # single sample then exit
+vminfo --web           # web dashboard on 127.0.0.1:9990
+vminfo --web --tui     # web + TUI together
+vminfo --web --bind 0.0.0.0 --port 8080
+vminfo ps              # Linux-only process list
+vminfo ps --json       # processes as JSON
+vminfo ps --sort mem   # sort by cpu|mem|pid|name
+vminfo kill <pid>      # SIGTERM a process (Linux)
+vminfo version --json  # build metadata
+vminfo --lang zh       # switch UI language
+```
+
+Built-in languages: `en`, `zh`, `de`, `es`, `fr`, `ja`, `ko`, `pt`, `ru`.
+
+## Web dashboard
+
+```bash
+vminfo --web                      # default: 127.0.0.1:9990
+vminfo --web --bind 0.0.0.0 --port 9990 --interval 1s
+```
+
+Endpoints:
+
+- `GET /healthz` — health check
+- `GET /api/v1/snapshot` — current snapshot JSON
+- `GET /ws` — live WebSocket stream
+
+## TUI controls
+
+| Key | Action |
+| --- | --- |
+| `q` / `ctrl+c` | Quit |
+| `?` | Toggle help |
+| `p` | Pause / resume |
+| `+` / `-` | Adjust interval |
+| `r` | Refresh now |
+| `tab` | Switch overview / processes |
+| `↑` / `↓` | Move selection |
+| `s` | Cycle sort |
+| `t` | Tree view |
+| `/` | Filter processes |
+| `k` | SIGTERM selected process |
+| `enter` / `y` | Confirm kill |
+| `esc` / `n` | Cancel |
+
+Status badges: `LIVE` · `PAUSED` · `LOADING` · `ERROR` · `STALE`
+
+## Library usage
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "time"
+
+    "github.com/VPSMarket/vminfo"
+)
+
+func main() {
+    ctx := context.Background()
+
+    static, _ := vminfo.CollectStatic(ctx)
+    stats, _ := vminfo.CollectStats(ctx, vminfo.Options{SampleInterval: time.Second})
+
+    fmt.Println(static.Hostname, stats.CPU)
 }
 ```
 
-对嵌入方也提供：
+Exported types: `StaticInfo` · `RuntimeStats` · `ProcessInfo` · `Snapshot` · `AppMetadata`
 
-```go
-meta := vminfo.Metadata()
-```
+## Platform support
 
-## Version 注入
+| Capability | Linux | macOS | Windows |
+| --- | --- | --- | --- |
+| `summary` / `watch` | ✅ | ✅ | ✅ |
+| TUI | ✅ | ✅ | ✅ |
+| Web dashboard | ✅ | ✅ | ✅ |
+| `ps` / `kill` | ✅ | ⚠️ stub | ⚠️ stub |
 
-建议通过 `-ldflags` 在构建时注入版本字段：
+TUI requires a real TTY. `ps` and `kill` are Linux-only by design.
+
+## Build from source
 
 ```bash
+git clone https://github.com/VPSMarket/vminfo.git
+cd vminfo
 go build -ldflags "\
-  -X github.com/VPSMarket/vminfo/pkg/vminfo.Version=v0.1.0 \
-  -X github.com/VPSMarket/vminfo/pkg/vminfo.Commit=$(git rev-parse --short HEAD) \
-  -X github.com/VPSMarket/vminfo/pkg/vminfo.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-  -X github.com/VPSMarket/vminfo/pkg/vminfo.Channel=stable" \
+  -X github.com/VPSMarket/vminfo.Version=v0.1.0 \
+  -X github.com/VPSMarket/vminfo.Commit=$(git rev-parse --short HEAD) \
+  -X github.com/VPSMarket/vminfo.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  -X github.com/VPSMarket/vminfo.Channel=stable" \
   ./cmd/vminfo
 ```
 
-## GitLab CI 与 Debian 运行
-
-仓库内置 `.gitlab-ci.yml`，会为 `main` 分支构建 Linux amd64 二进制产物：
-
-- job 名：`build-linux-amd64`
-- artifact 路径：`dist/vminfo-linux-amd64`
-
-在 Debian x86_64 VPS 上，可用仓库脚本下载并运行最新成功构建：
+## Development
 
 ```bash
-bash scripts/run_latest_vminfo.sh
+gofmt -w $(git ls-files '*.go')
+go test ./...
+go vet ./...
+go run ./cmd/vminfo summary --json
 ```
 
-默认执行：
+## Documentation
 
-```bash
-vminfo summary
-```
+- [CHANGELOG.md](CHANGELOG.md)
+- [docs/DESIGN-vminfo-bootstrap.md](docs/DESIGN-vminfo-bootstrap.md)
 
-也可以传入参数：
+## License
 
-```bash
-bash scripts/run_latest_vminfo.sh version --json
-bash scripts/run_latest_vminfo.sh watch --count 1
-bash scripts/run_latest_vminfo.sh ps
-```
-
-如果仓库是私有的，先设置：
-
-```bash
-export GITLAB_TOKEN=your_gitlab_pat
-```
-
-## 本地运行
-
-```bash
-go run ./cmd/vminfo
-```
-
-查看帮助：
-
-```bash
-go run ./cmd/vminfo --help
-```
-
-单次 watch 验证：
-
-```bash
-go run ./cmd/vminfo watch --count 1
-go run ./cmd/vminfo watch --json --count 1
-```
+[MIT](LICENSE)

@@ -2,163 +2,905 @@ package tui
 
 import (
 	"fmt"
+	"net"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/VPSMarket/vminfo"
 )
+
+// ── Styles & Constants ────────────────────────────────────────────────
 
 var (
-	colorTitle = lipgloss.Color("12")
-	colorMuted = lipgloss.Color("8")
-	colorInfo  = lipgloss.Color("14")
-	colorWarn  = lipgloss.Color("11")
-	colorError = lipgloss.Color("9")
-	colorOK    = lipgloss.Color("10")
+	outerStyle = lipgloss.NewStyle().Padding(0, 1)
 
-	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(colorTitle)
-	mutedStyle  = lipgloss.NewStyle().Foreground(colorMuted)
-	infoStyle   = lipgloss.NewStyle().Foreground(colorInfo)
-	warnStyle   = lipgloss.NewStyle().Foreground(colorWarn)
-	errorStyle  = lipgloss.NewStyle().Foreground(colorError)
-	okStyle     = lipgloss.NewStyle().Foreground(colorOK)
-	panelStyle  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
-	headerStyle = lipgloss.NewStyle().PaddingBottom(1)
+	panelStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			Padding(0, 1).
+			BorderForeground(CBorder)
+
+	subtleStyle = lipgloss.NewStyle().Foreground(CDim)
+	warnStyle   = lipgloss.NewStyle().Foreground(CYellow)
+	errorStyle  = lipgloss.NewStyle().Foreground(CRed)
+	valueStyle  = lipgloss.NewStyle().Foreground(CText).Bold(true)
+
+	labelW = 8
+
+	// Progress bar chars
+	blockFull  = '█'
+	blockEmpty = '·'
+
+	// Sparkline — uses block elements that render well in all terminals
+	sparklineChars = []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
 )
 
+// ── Main View ────────────────────────────────────────────────────────
+
 func (m Model) View() string {
+	var content string
 	if m.killConfirm {
-		return m.renderKillConfirm()
+		content = m.renderKillConfirm()
+	} else if m.showHelp {
+		content = m.renderHelp()
+	} else {
+		content = m.renderMain()
 	}
-	if m.showHelp {
-		return m.renderHelp()
+
+	// Pad output to fill terminal height so previous frame content is cleared
+	if m.height > 0 {
+		lines := strings.Count(content, "\n") + 1
+		if lines < m.height {
+			content += strings.Repeat("\n", m.height-lines)
+		}
 	}
-	return m.renderMain()
+	return content
 }
 
 func (m Model) renderMain() string {
-	parts := []string{
-		headerStyle.Render(
-			titleStyle.Render("vminfo "+firstNonEmpty(m.static.Hostname, "-")) +
-				"  " + m.renderBadge(m.stateLabel(), m.stateColor()) +
-				"  " + m.renderBadge(m.pageLabel(), colorInfo),
-		),
-	}
+	// Header bar
+	host := lipgloss.NewStyle().Bold(true).Foreground(CText).Render(
+		" vminfo " + firstNonEmpty(m.static.Hostname, "-"),
+	)
+	stateBadge := m.renderBadge(m.stateLabel(), m.stateColor())
+	pageBadge := m.renderBadge(m.pageLabel(), CBlue)
+	header := lipgloss.NewStyle().Foreground(CBorder).
+		Border(lipgloss.NormalBorder(), false, false, true, false).
+		PaddingBottom(0).
+		Render(host + "  " + stateBadge + "  " + pageBadge)
 
+	var body string
 	if m.view == viewOverview {
-		parts = append(parts, m.renderOverview())
+		body = m.renderOverview()
 	} else {
-		parts = append(parts, m.renderProcesses())
+		body = m.renderProcesses()
 	}
 
-	parts = append(parts, "", mutedStyle.Render(m.statusLine()), mutedStyle.Render(m.footerHints()))
-	return lipgloss.NewStyle().Padding(1, 2).Render(strings.Join(parts, "\n"))
+	status := subtleStyle.Render(m.statusLine())
+	separator := lipgloss.NewStyle().Foreground(CBorder).Render(
+		strings.Repeat("─", max(m.width-4, 10)))
+	footer := subtleStyle.Render(m.hintsForMode())
+
+	return outerStyle.Render(strings.Join([]string{header, body, "", status, separator, footer}, "\n"))
 }
+
+// ── Overview ─────────────────────────────────────────────────────────
 
 func (m Model) renderOverview() string {
-	staticLines := []string{
-		fmt.Sprintf("OS           %s", strings.TrimSpace(strings.Join([]string{firstNonEmpty(m.static.Platform, m.static.OS, "-"), strings.TrimSpace(m.static.OSVersion)}, " "))),
-		fmt.Sprintf("Kernel       %s", firstNonEmpty(m.static.Kernel, "-")),
-		fmt.Sprintf("Arch         %s", firstNonEmpty(m.static.Arch, "-")),
-		fmt.Sprintf("CPU          %s (%d cores)", firstNonEmpty(m.static.CPUModel, "-"), m.static.CPUCores),
-		fmt.Sprintf("Memory       %s", formatBytes(m.static.MemTotal)),
-		fmt.Sprintf("Swap         %s", formatBytes(m.static.SwapTotal)),
-		fmt.Sprintf("Disk         %s", formatBytes(m.static.DiskTotal)),
-		fmt.Sprintf("Virt         %s", firstNonEmpty(m.static.Virtualization, "-")),
+	totalW := m.width
+	if totalW <= 0 {
+		totalW = 120
 	}
-	left := panelStyle.Render(strings.Join(staticLines, "\n"))
 
-	dynamicLines := []string{"Loading runtime stats..."}
-	if m.hasStats {
-		dynamicLines = []string{
-			fmt.Sprintf("CPU          %s", formatPercent(m.stats.CPU)),
-			fmt.Sprintf("Load         %.2f %.2f %.2f", m.stats.Load1, m.stats.Load5, m.stats.Load15),
-			fmt.Sprintf("Memory       %s / %s", formatBytes(m.stats.MemUsed), formatBytes(m.static.MemTotal)),
-			fmt.Sprintf("Swap         %s / %s", formatBytes(m.stats.SwapUsed), formatBytes(m.static.SwapTotal)),
-			fmt.Sprintf("Disk         %s / %s", formatBytes(m.stats.DiskUsed), formatBytes(m.static.DiskTotal)),
-			fmt.Sprintf("Network      ↓ %s/s ↑ %s/s", formatBytes(m.stats.NetInSpeed), formatBytes(m.stats.NetOutSpeed)),
-			fmt.Sprintf("Conn         tcp %d / udp %d / proc %d", m.stats.TCPCount, m.stats.UDPCount, m.stats.ProcessCount),
-			fmt.Sprintf("Uptime       %s", formatUptime(m.stats.Uptime)),
-		}
-		if len(m.stats.CPUPerCore) > 0 {
-			coreText := make([]string, 0, minInt(len(m.stats.CPUPerCore), maxVisiblePerCore))
-			for i, value := range m.stats.CPUPerCore {
-				if i >= maxVisiblePerCore {
-					break
-				}
-				coreText = append(coreText, fmt.Sprintf("c%d=%s", i, formatPercent(value)))
-			}
-			dynamicLines = append(dynamicLines, "Cores        "+strings.Join(coreText, "  "))
-		}
+	gap := lipgloss.NewStyle().Width(panelGap).Render(" ")
+	makePanel := func(w int) lipgloss.Style {
+		return lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			Padding(0, 1).
+			BorderForeground(CBorder).
+			Width(w)
 	}
-	if m.statsErr != nil {
-		dynamicLines = append(dynamicLines, errorStyle.Render("Error        "+m.statsErr.Error()))
-	}
-	right := panelStyle.Render(strings.Join(dynamicLines, "\n"))
 
-	if m.width > 120 {
-		return lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right)
+	fullW := calcFullWidth(totalW)
+
+	switch m.layoutMode() {
+	case layoutWide:
+		// >= 140: 2-col Row 1 (System|DiskIO) + full Resources + full Network
+		sysW, diskW := calcRow1Widths(totalW)
+		sysContent, diskContent := m.renderSystemContent(), m.renderDiskIOContent()
+		sysContent, diskContent = equalizeContent2(sysContent, diskContent)
+		sysCard := makePanel(sysW).Render(sysContent)
+		diskCard := makePanel(diskW).Render(diskContent)
+		topRow := lipgloss.JoinHorizontal(lipgloss.Top, sysCard, gap, diskCard)
+		resCard := makePanel(fullW).Render(m.renderResourceContent())
+		netCard := makePanel(fullW).Render(m.renderNetworkContent())
+		return lipgloss.JoinVertical(lipgloss.Left, topRow, resCard, netCard)
+
+	case layoutMedium:
+		// 100-139: 2-col Row 1 (System|DiskIO) + full Resources + full Network
+		sysW, diskW := calcRow1Widths(totalW)
+		sysContent, diskContent := m.renderSystemContent(), m.renderDiskIOContent()
+		sysContent, diskContent = equalizeContent2(sysContent, diskContent)
+		sysCard := makePanel(sysW).Render(sysContent)
+		diskCard := makePanel(diskW).Render(diskContent)
+		topRow := lipgloss.JoinHorizontal(lipgloss.Top, sysCard, gap, diskCard)
+		resCard := makePanel(fullW).Render(m.renderResourceContent())
+		netCard := makePanel(fullW).Render(m.renderNetworkContent())
+		return lipgloss.JoinVertical(lipgloss.Left, topRow, resCard, netCard)
+
+	case layoutNarrow:
+		// 80-99: single column, all panels full width
+		sysCard := makePanel(fullW).Render(m.renderSystemContent())
+		diskCard := makePanel(fullW).Render(m.renderDiskIOContent())
+		resCard := makePanel(fullW).Render(m.renderResourceContent())
+		netCard := makePanel(fullW).Render(m.renderNetworkContent())
+		return lipgloss.JoinVertical(lipgloss.Left, sysCard, diskCard, resCard, netCard)
+
+	default:
+		// < 80: compact — only Resources + Network
+		resCard := makePanel(fullW).Render(m.renderResourceContent())
+		netCard := makePanel(fullW).Render(m.renderNetworkContent())
+		compactHint := subtleStyle.Render(m.tr.T("Terminal too narrow, showing compact view. Resize for full dashboard."))
+		return lipgloss.JoinVertical(lipgloss.Left, resCard, netCard, compactHint)
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, left, "", right)
 }
 
-func (m Model) renderProcesses() string {
+// ── Panel content renderers (no border, border applied by caller) ────
+
+func (m Model) renderSystemContent() string {
+	sysW := sysInnerWidth(m.width)
+	valW := max(sysW-labelW-2, 10)
+
+	lines := []string{
+		m.panelTitle("System"),
+		"",
+		m.kv("OS", truncate(firstNonEmpty(m.static.Platform, m.static.OS, "-")+" "+strings.TrimSpace(m.static.OSVersion), valW)),
+		m.kv("Kernel", truncate(firstNonEmpty(m.static.Kernel, "-"), valW)),
+		m.kv("Arch", firstNonEmpty(m.static.Arch, "-")),
+		m.kv("Host", firstNonEmpty(m.static.Hostname, "-")),
+		m.kv("CPU", truncate(fmt.Sprintf("%s ("+m.tr.T("%d cores")+")", firstNonEmpty(m.static.CPUModel, "-"), m.static.CPUCores), valW)),
+	}
+	if v := firstNonEmpty(m.static.Virtualization, ""); v != "" && v != "-" {
+		lines = append(lines, m.kv("Virt", v))
+	}
+	if m.hasStats {
+		lines = append(lines, m.label("Uptime")+lipgloss.NewStyle().Foreground(CGreen).Render(formatUptime(m.stats.Uptime)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderCPUContent() string {
+	lines := []string{
+		m.panelTitle("CPU"),
+		"",
+	}
+
+	if len(m.cpuHistory) > 1 {
+		sparkW := max(m.width/3, 30)
+		spark := renderSparkline(m.cpuHistory, sparkW)
+		lines = append(lines, spark)
+
+		cur := m.cpuHistory[len(m.cpuHistory)-1]
+		statsLine := subtleStyle.Render("  cur ") + colorizePercent(cur) +
+			subtleStyle.Render("  "+m.tr.T("avg")+" ") + colorizePercent(avgFloat64(m.cpuHistory)) +
+			subtleStyle.Render("  "+m.tr.T("max")+" ") + colorizePercent(maxFloat64(m.cpuHistory))
+		lines = append(lines, statsLine)
+	} else {
+		lines = append(lines, subtleStyle.Render(m.tr.T("Collecting...")))
+	}
+
+	if m.hasStats {
+		var extras []string
+		if len(m.stats.Temps) > 0 {
+			t := m.stats.Temps[0]
+			tc := colorForTempEnhanced(t.Temperature)
+			extras = append(extras, lipgloss.NewStyle().Foreground(tc).Bold(true).Render(
+				fmt.Sprintf("%.0f°C", t.Temperature)))
+		}
+		if len(extras) > 0 {
+			lines = append(lines, subtleStyle.Render("  ")+strings.Join(extras, subtleStyle.Render("  ")))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderResourceContent() string {
+	title := m.panelTitle("Resources")
+
+	if !m.hasStats {
+		return title + "\n\n" + m.spinner.View() + " " + subtleStyle.Render(m.tr.T("Loading..."))
+	}
+	if m.statsErr != nil {
+		return title + "\n\n" + errorStyle.Render(m.tr.Tf("Error: %s", m.statsErr.Error()))
+	}
+
+	innerW := resInnerWidth(m.width)
+	// Split: left ~45% for bars, right ~55% for sparkline/cores
+	leftW := max(innerW*45/100, 30)
+	rightW := max(innerW-leftW-1, 20) // 1 for separator
+
+	// ─── Left: progress bars ───
+	cpuPct := m.stats.CPU
+	memPct := safePercent(m.stats.MemUsed, m.static.MemTotal)
+	swapPct := safePercent(m.stats.SwapUsed, m.static.SwapTotal)
+	diskPct := safePercent(m.stats.DiskUsed, m.static.DiskTotal)
+
+	leftLines := []string{
+		m.renderResourceBar("CPU", cpuPct, 0, 0),
+		m.renderResourceBar("Mem", memPct, m.stats.MemUsed, m.static.MemTotal),
+		m.renderResourceBar("Swap", swapPct, m.stats.SwapUsed, m.static.SwapTotal),
+		m.renderResourceBar("Disk", diskPct, m.stats.DiskUsed, m.static.DiskTotal),
+	}
+
+	// ─── Right: sparkline + stats + cores ───
+	rightLines := []string{}
+	if len(m.cpuHistory) > 1 {
+		spark := renderSparkline(m.cpuHistory, rightW)
+		rightLines = append(rightLines, spark)
+
+		cur := m.cpuHistory[len(m.cpuHistory)-1]
+		statsLine := subtleStyle.Render(m.tr.T("cur")+" ") + colorizePercent(cur) +
+			subtleStyle.Render("  "+m.tr.T("avg")+" ") + colorizePercent(avgFloat64(m.cpuHistory)) +
+			subtleStyle.Render("  "+m.tr.T("max")+" ") + colorizePercent(maxFloat64(m.cpuHistory))
+		var extras []string
+		if len(m.stats.Temps) > 0 {
+			t := m.stats.Temps[0]
+			tc := colorForTempEnhanced(t.Temperature)
+			extras = append(extras, lipgloss.NewStyle().Foreground(tc).Bold(true).Render(fmt.Sprintf("%.0f\u00b0C", t.Temperature)))
+		}
+		if len(extras) > 0 {
+			statsLine += subtleStyle.Render("  ") + strings.Join(extras, subtleStyle.Render("  "))
+		}
+		rightLines = append(rightLines, statsLine)
+	} else {
+		rightLines = append(rightLines, subtleStyle.Render(m.tr.T("Collecting...")))
+	}
+
+	// Cores bar
+	if len(m.stats.CPUPerCore) > 0 {
+		limit := min(len(m.stats.CPUPerCore), 16)
+		isCompact := len(m.stats.CPUPerCore) > 8
+		chars := make([]string, 0, limit)
+		for i := 0; i < limit; i++ {
+			chars = append(chars, miniBar(m.stats.CPUPerCore[i]))
+		}
+		sep := " "
+		if isCompact {
+			sep = ""
+		}
+		coreLine := strings.Join(chars, sep)
+		if len(m.stats.CPUPerCore) > 16 {
+			coreLine += subtleStyle.Render(fmt.Sprintf("+%d", len(m.stats.CPUPerCore)-16))
+		}
+		// Average
+		var sum float64
+		for _, v := range m.stats.CPUPerCore[:limit] {
+			sum += v
+		}
+		coreAvg := sum / float64(limit)
+		coreLine += subtleStyle.Render("  "+m.tr.T("avg")+" ") + lipgloss.NewStyle().Foreground(ThresholdColor(coreAvg)).Render(fmt.Sprintf("%.1f%%", coreAvg))
+		rightLines = append(rightLines, "", subtleStyle.Render(m.tr.T("Cores")+" ")+coreLine)
+		if !isCompact {
+			nums := make([]string, limit)
+			for i := range nums {
+				nums[i] = fmt.Sprintf("%d", i)
+			}
+			coreNums := strings.Join(nums, sep)
+			rightLines = append(rightLines, subtleStyle.Render("      ")+coreNums)
+		}
+	}
+
+	// ─── Equalize line count ───
+	maxLines := len(leftLines)
+	if len(rightLines) > maxLines {
+		maxLines = len(rightLines)
+	}
+	for len(leftLines) < maxLines {
+		leftLines = append(leftLines, "")
+	}
+	for len(rightLines) < maxLines {
+		rightLines = append(rightLines, "")
+	}
+
+	// ─── Build body lines ───
+	bodyLines := []string{""}
+	for i := 0; i < maxLines; i++ {
+		left := lipgloss.NewStyle().Width(leftW).Render(leftLines[i])
+		sepChar := lipgloss.NewStyle().Foreground(CBorder).Render("\u2502")
+		right := rightLines[i]
+		bodyLines = append(bodyLines, left+" "+sepChar+" "+right)
+	}
+
+	return title + "\n" + strings.Join(bodyLines, "\n")
+}
+
+func (m Model) renderDiskIOContent() string {
+	lines := []string{
+		m.panelTitle("Disk I/O"),
+		"",
+	}
+
+	if m.hasStats && len(m.stats.DiskIO) > 0 {
+		// Sort: active devices first, then idle
+		disks := make([]vminfo.DiskIOStats, len(m.stats.DiskIO))
+		copy(disks, m.stats.DiskIO)
+		sort.SliceStable(disks, func(i, j int) bool {
+			iActive := disks[i].ReadSpeed > 0 || disks[i].WriteSpeed > 0 || disks[i].IOPS > 0
+			jActive := disks[j].ReadSpeed > 0 || disks[j].WriteSpeed > 0 || disks[j].IOPS > 0
+			return iActive && !jActive
+		})
+		for _, d := range disks {
+			isIdle := d.ReadSpeed == 0 && d.WriteSpeed == 0 && d.IOPS == 0
+			if isIdle {
+				line := lipgloss.NewStyle().Foreground(CMuted).Render(fmt.Sprintf("%-8s ↓%6s/s  ↑%6s/s  iops %d",
+					truncate(d.Name, 8), formatBytes(d.ReadSpeed), formatBytes(d.WriteSpeed), d.IOPS))
+				lines = append(lines, line)
+			} else {
+				line := lipgloss.NewStyle().Foreground(CText).Bold(true).Render(
+					fmt.Sprintf("%-8s", truncate(d.Name, 8))) +
+					" ↓" + lipgloss.NewStyle().Foreground(CBrightGreen).Render(fmt.Sprintf("%6s/s", formatBytes(d.ReadSpeed))) +
+					"  ↑" + lipgloss.NewStyle().Foreground(CPink).Render(fmt.Sprintf("%6s/s", formatBytes(d.WriteSpeed))) +
+					subtleStyle.Render(fmt.Sprintf("  iops %d", d.IOPS))
+				lines = append(lines, line)
+			}
+		}
+	} else if m.hasStats {
+		lines = append(lines, subtleStyle.Render(m.tr.T("No data")))
+	} else {
+		lines = append(lines, m.spinner.View()+" "+subtleStyle.Render(m.tr.T("Loading...")))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderNetworkContent() string {
+	lines := []string{
+		m.panelTitle("Network & Load"),
+		"",
+	}
+
+	if !m.hasStats {
+		lines = append(lines, m.spinner.View()+" "+subtleStyle.Render(m.tr.T("Loading...")))
+		return strings.Join(lines, "\n")
+	}
+
+	cores := m.static.CPUCores
+	if cores == 0 {
+		cores = 1
+	}
+
+	// ── Summary line: Load + Net + TCP/UDP ──
+	loadColor := func(load float64) lipgloss.Color {
+		ratio := load / float64(cores)
+		return ThresholdColor(ratio * 100)
+	}
+	loadStr := lipgloss.NewStyle().Foreground(loadColor(m.stats.Load1)).Render(fmt.Sprintf("%.2f", m.stats.Load1)) + " " +
+		lipgloss.NewStyle().Foreground(loadColor(m.stats.Load5)).Render(fmt.Sprintf("%.2f", m.stats.Load5)) + " " +
+		lipgloss.NewStyle().Foreground(loadColor(m.stats.Load15)).Render(fmt.Sprintf("%.2f", m.stats.Load15))
+	rx := lipgloss.NewStyle().Foreground(CBrightGreen).Render(formatBytes(m.stats.NetInSpeed)+"/s")
+	tx := lipgloss.NewStyle().Foreground(CPink).Render(formatBytes(m.stats.NetOutSpeed)+"/s")
+
+	summary := subtleStyle.Render("Load"+" ") + loadStr +
+		subtleStyle.Render("   Net"+" ") + rx + " " + tx +
+		subtleStyle.Render("   TCP"+" ") + valueStyle.Render(fmt.Sprintf("%d", m.stats.TCPCount)) +
+		subtleStyle.Render("  UDP"+" ") + valueStyle.Render(fmt.Sprintf("%d", m.stats.UDPCount))
+	lines = append(lines, summary)
+
+	// ── Interface table ──
+	ifaces := m.stats.Interfaces
+	if len(ifaces) == 0 {
+		return strings.Join(lines, "\n")
+	}
+
+	// Sort: active first, then physical > bridge > docker > veth
+	sorted := make([]vminfo.InterfaceIO, len(ifaces))
+	copy(sorted, ifaces)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		aActive := sorted[i].RxSpeed > 0 || sorted[i].TxSpeed > 0
+		bActive := sorted[j].RxSpeed > 0 || sorted[j].TxSpeed > 0
+		if aActive != bActive {
+			return aActive
+		}
+		aPri := ifacePriority(sorted[i].Name)
+		bPri := ifacePriority(sorted[j].Name)
+		if aPri != bPri {
+			return aPri < bPri
+		}
+		return sorted[i].Name < sorted[j].Name
+	})
+
+	wide := m.width >= 100
+	narrow := m.width < 80
+
+	// Column header
+	if !narrow {
+		colHdr := subtleStyle.Render("  IFACE") + strings.Repeat(" ", 7) +
+			subtleStyle.Render("IP") + strings.Repeat(" ", 15) +
+			subtleStyle.Render("RX/s") + strings.Repeat(" ", 10) +
+			subtleStyle.Render("TX/s") + strings.Repeat(" ", 10)
+		if wide {
+			colHdr += subtleStyle.Render("TOTAL RX") + strings.Repeat(" ", 4) +
+				subtleStyle.Render("TOTAL TX")
+		}
+		lines = append(lines, "", colHdr)
+	}
+
+	// Styles
+	greenDot := lipgloss.NewStyle().Foreground(COk).Render("\u25cf")   // ●
+	grayDot := lipgloss.NewStyle().Foreground(CMuted).Render("\u25cb") // ○
+
+	// Render rows
+	idleCount := 0
+	var idleTotalRx, idleTotalTx uint64
+	for _, iface := range sorted {
+		isActive := iface.RxSpeed > 0 || iface.TxSpeed > 0
+
+		// Fold idle interfaces if too many
+		if !isActive && idleCount >= 3 && len(sorted) > 5 {
+			idleCount++
+			idleTotalRx += iface.RxBytes
+			idleTotalTx += iface.TxBytes
+			continue
+		}
+
+		dot := grayDot
+		rowStyle := lipgloss.NewStyle().Foreground(CMuted)
+		if isActive {
+			dot = greenDot
+			rowStyle = lipgloss.NewStyle().Foreground(CText)
+		}
+
+		name := truncateIfaceName(iface.Name, 12)
+		ip := iface.IPv4
+		if ip == "" {
+			ip = "\u2014" // —
+		}
+
+		// IP color: public blue bold, private gray
+		ipStyle := lipgloss.NewStyle().Foreground(CMuted)
+		if ip != "\u2014" && !isPrivateIP(ip) {
+			ipStyle = lipgloss.NewStyle().Foreground(CInfo).Bold(true)
+		}
+
+		if narrow {
+			// Compact: dot + name + ip + speed
+			row := "  " + dot + " " + rowStyle.Render(fmt.Sprintf("%-10s", name)) + " " +
+				ipStyle.Render(fmt.Sprintf("%-15s", ip)) +
+				" " + lipgloss.NewStyle().Foreground(CBrightGreen).Render(fmt.Sprintf("\u2193%s/s", formatBytes(iface.RxSpeed))) +
+				" " + lipgloss.NewStyle().Foreground(CPink).Render(fmt.Sprintf("\u2191%s/s", formatBytes(iface.TxSpeed)))
+			lines = append(lines, row)
+		} else {
+			// Table: fixed-width columns
+			row := "  " + dot + " " + rowStyle.Render(fmt.Sprintf("%-12s", name)) +
+				ipStyle.Render(fmt.Sprintf("%-16s", ip)) +
+				rowStyle.Render(fmt.Sprintf("%13s/s", formatBytes(iface.RxSpeed))) +
+				rowStyle.Render(fmt.Sprintf("%13s/s", formatBytes(iface.TxSpeed)))
+			if wide {
+				row += rowStyle.Render(fmt.Sprintf("%12s", formatBytes(iface.RxBytes))) +
+					rowStyle.Render(fmt.Sprintf("%12s", formatBytes(iface.TxBytes)))
+			}
+			lines = append(lines, row)
+		}
+
+		if !isActive {
+			idleCount++
+		}
+	}
+
+	// Collapsed idle summary
+	totalIdle := 0
+	for _, iface := range sorted {
+		if iface.RxSpeed == 0 && iface.TxSpeed == 0 {
+			totalIdle++
+		}
+	}
+	maxShowIdle := 3
+	if len(sorted) <= 5 {
+		maxShowIdle = totalIdle
+	}
+	foldedCount := totalIdle - min(totalIdle, maxShowIdle)
+	if foldedCount > 0 {
+		summary := "  " + grayDot + " " + lipgloss.NewStyle().Foreground(CMuted).Render(
+			fmt.Sprintf("%d idle interfaces", foldedCount))
+		if wide && (idleTotalRx > 0 || idleTotalTx > 0) {
+			summary += lipgloss.NewStyle().Foreground(CMuted).Render(
+				fmt.Sprintf("%12s%12s", formatBytes(idleTotalRx), formatBytes(idleTotalTx)))
+		}
+		lines = append(lines, summary)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// ── Progress Bar ─────────────────────────────────────────────────────
+
+const maxBarWidth = 30
+
+// renderResourceBar renders a single-line resource bar: label + bar + pct + abs
+func (m Model) renderResourceBar(lbl string, pct float64, used, total uint64) string {
+	barW := maxBarWidth
+	color := ThresholdColor(pct)
+
+	ratio := max(pct/100, 0)
+	ratio = min(ratio, 1)
+	filled := int(ratio * float64(barW))
+	filled = min(filled, barW)
+	empty := barW - filled
+
+	barFilled := lipgloss.NewStyle().Foreground(color).Render(strings.Repeat(string(blockFull), filled))
+	barEmpty := lipgloss.NewStyle().Foreground(CMuted).Render(strings.Repeat(string(blockEmpty), empty))
+
+	pctStr := lipgloss.NewStyle().Foreground(color).Bold(true).Render(fmt.Sprintf("%5.1f%%", pct))
+
+	absStr := ""
+	if total > 0 {
+		absStr = lipgloss.NewStyle().Foreground(CDim).Render(fmt.Sprintf("  %s/%s", formatBytes(used), formatBytes(total)))
+	}
+
+	return lipgloss.NewStyle().Foreground(CDim).Width(6).Render(m.tr.T(lbl)) + barFilled + barEmpty + " " + pctStr + absStr
+}
+
+// Mini inline bar for per-core display
+func miniBar(pct float64) string {
+	idx := int((pct / 100.0) * float64(len(sparklineChars)-1))
+	idx = max(idx, 0)
+	idx = min(idx, len(sparklineChars)-1)
+	return lipgloss.NewStyle().Foreground(colorForPercent(pct)).Render(string(sparklineChars[idx]))
+}
+
+// ── Sparkline ────────────────────────────────────────────────────────
+
+func renderSparkline(data []float64, width int) string {
+	if len(data) == 0 || width <= 0 {
+		return ""
+	}
+	sampled := sampleData(data, width)
+	var sb strings.Builder
+
+	// Pad left with ▁ when insufficient data
+	padCount := width - len(sampled)
+	if padCount > 0 {
+		padChar := lipgloss.NewStyle().Foreground(lipgloss.Color("#4a5568")).Render(string(sparklineChars[0]))
+		for range padCount {
+			sb.WriteString(padChar)
+		}
+	}
+
+	// Render actual data points
+	for _, value := range sampled {
+		idx := int((value / 100.0) * float64(len(sparklineChars)-1))
+		idx = max(idx, 0)
+		idx = min(idx, len(sparklineChars)-1)
+		sb.WriteString(lipgloss.NewStyle().Foreground(colorForPercent(value)).Render(string(sparklineChars[idx])))
+	}
+	return sb.String()
+}
+
+func sampleData(data []float64, targetLen int) []float64 {
+	if len(data) <= targetLen {
+		return data
+	}
+	return data[len(data)-targetLen:]
+}
+
+// ── Color Helpers ────────────────────────────────────────────────────
+
+func colorForPercent(pct float64) lipgloss.Color {
+	return ThresholdColor(pct)
+}
+
+func colorizePercent(pct float64) string {
+	return lipgloss.NewStyle().Foreground(colorForPercent(pct)).Bold(true).Render(fmt.Sprintf("%.1f%%", pct))
+}
+
+// colorForTempEnhanced uses 4-tier thresholds for CPU temperature display.
+func colorForTempEnhanced(temp float64) lipgloss.Color {
+	switch {
+	case temp >= 90:
+		return CCritical
+	case temp >= 80:
+		return CAlert
+	case temp >= 60:
+		return CWarn
+	default:
+		return COk
+	}
+}
+
+// equalizeContent pads multiple content strings to the same line count,
+// so that makePanel().Render() produces panels of equal height.
+func equalizeContent(contents ...string) []string {
+	maxLines := 0
+	split := make([][]string, len(contents))
+	for i, c := range contents {
+		lines := strings.Split(c, "\n")
+		split[i] = lines
+		if len(lines) > maxLines {
+			maxLines = len(lines)
+		}
+	}
+	result := make([]string, len(contents))
+	for i, lines := range split {
+		for len(lines) < maxLines {
+			lines = append(lines, "")
+		}
+		result[i] = strings.Join(lines, "\n")
+	}
+	return result
+}
+
+// equalizeContent2 pads two content strings to the same line count.
+func equalizeContent2(a, b string) (string, string) {
+	r := equalizeContent(a, b)
+	return r[0], r[1]
+}
+
+// ── Layout Helpers ───────────────────────────────────────────────────
+
+func (m Model) panelTitle(text string) string {
+	icon := ""
+	if v, ok := PanelIcons[text]; ok {
+		icon = lipgloss.NewStyle().Foreground(CBlue).Render(v + " ")
+	}
+	return icon + lipgloss.NewStyle().Bold(true).Foreground(CCyan).Render(m.tr.T(text)) +
+		subtleStyle.Render(" "+strings.Repeat("─", 20))
+}
+
+func (m Model) label(key string) string {
+	return lipgloss.NewStyle().Foreground(CDim).Width(labelW).Render(m.tr.T(key))
+}
+
+func (m Model) kv(key, value string) string {
+	return m.label(key) + valueStyle.Render(value)
+}
+
+// ── Processes View ───────────────────────────────────────────────────
+
+// depthColor returns a dimmer text color based on tree depth.
+func depthColor(depth int) lipgloss.Color {
+	switch {
+	case depth == 0:
+		return CText
+	case depth == 1:
+		return lipgloss.Color("#a0a8c0")
+	case depth == 2:
+		return lipgloss.Color("#8088a0")
+	default:
+		return CDim
+	}
+}
+
+func (m Model) renderProcessTree() string {
 	if m.processErr != nil {
 		return panelStyle.Render(errorStyle.Render(m.processErr.Error()))
 	}
-	items := m.sortedProcesses()
-	if len(items) == 0 {
-		return panelStyle.Render("Loading process list...")
+	roots := m.buildProcessTree()
+	if len(roots) == 0 {
+		return panelStyle.Render(m.spinner.View() + " " + subtleStyle.Render(m.tr.T("Loading...")))
 	}
-
-	start, end := m.processWindow(len(items))
-	lines := []string{
-		"SEL  PID    CPU%   MEM%   RSS        USER           NAME",
-	}
-	for idx := start; idx < end; idx++ {
-		item := items[idx]
-		marker := " "
-		if idx == clampIndex(m.selected, len(items)) {
-			marker = ">"
+	hdr := m.panelTitle("Processes (tree)")
+	lines := []string{hdr, ""}
+	lines = append(lines, subtleStyle.Render(fmt.Sprintf("%-6s %5s %5s  %s", m.tr.T("PID"), m.tr.T("CPU%"), m.tr.T("MEM%"), m.tr.T("NAME"))))
+	connectorColor := lipgloss.Color("#444444")
+	var renderNodes func(nodes []treeNode, prefix string)
+	renderNodes = func(nodes []treeNode, prefix string) {
+		for i, node := range nodes {
+			connector := "├─ "
+			if i == len(nodes)-1 {
+				connector = "└─ "
+			}
+			cpuColor := colorForPercent(node.proc.CPUPercent)
+			nameColor := depthColor(node.depth)
+			line := lipgloss.NewStyle().Foreground(CText).Render(
+				fmt.Sprintf("%-6d ", node.proc.PID)) +
+				lipgloss.NewStyle().Foreground(cpuColor).Render(
+					fmt.Sprintf("%5.1f ", node.proc.CPUPercent)) +
+				lipgloss.NewStyle().Foreground(CText).Render(
+					fmt.Sprintf("%5.1f  ", node.proc.MemoryPercent)) +
+				subtleStyle.Render(prefix) +
+				lipgloss.NewStyle().Foreground(connectorColor).Render(connector) +
+				lipgloss.NewStyle().Foreground(nameColor).Render(firstNonEmpty(node.proc.Name, "-"))
+			lines = append(lines, line)
+			childPrefix := prefix + "│ "
+			if i == len(nodes)-1 {
+				childPrefix = prefix + "  "
+			}
+			renderNodes(node.children, childPrefix)
 		}
-		lines = append(lines, fmt.Sprintf(
-			"%s    %-6d %-6.1f %-6.1f %-10s %-14s %s",
-			marker,
-			item.PID,
-			item.CPUPercent,
-			item.MemoryPercent,
-			formatBytes(item.RSSBytes),
-			truncate(firstNonEmpty(item.User, "-"), 14),
-			truncate(firstNonEmpty(item.Name, "-"), 36),
-		))
 	}
-
-	selected, ok := m.selectedProcess()
-	if ok {
-		lines = append(lines, "", mutedStyle.Render(
-			fmt.Sprintf("selected pid=%d name=%s state=%s", selected.PID, firstNonEmpty(selected.Name, "-"), firstNonEmpty(selected.State, "-")),
-		))
-	}
+	renderNodes(roots, "")
 	return panelStyle.Render(strings.Join(lines, "\n"))
 }
 
-func (m Model) renderHelp() string {
-	lines := []string{
-		titleStyle.Render("vminfo help"),
-		"",
-		"q / ctrl+c     quit",
-		"?              toggle help",
-		"p              pause/resume refresh",
-		"r              refresh now",
-		"tab            switch overview / processes",
-		"up / down      move process selection",
-		"s              cycle process sort in processes view",
-		"k              kill selected process (with confirm)",
-		"enter / y      confirm kill",
-		"esc / n        cancel kill/help",
+func (m Model) renderProcesses() string {
+	if m.treeView {
+		return m.renderProcessTree()
 	}
-	return lipgloss.NewStyle().Padding(1, 2).Render(panelStyle.Render(strings.Join(lines, "\n")))
+	if m.processErr != nil {
+		return panelStyle.Render(errorStyle.Render(m.processErr.Error()))
+	}
+	items := m.filteredProcesses()
+	if len(items) == 0 {
+		return panelStyle.Render(m.spinner.View() + " " + subtleStyle.Render(m.tr.T("Loading...")))
+	}
+
+	// Full-width panel for processes view
+	w := m.width
+	if w <= 0 {
+		w = 120
+	}
+	panelW := max(w-4, 40)
+	innerW := max(panelW-4, 20)
+
+	hdr := m.panelTitle("Processes")
+	headerLines := []string{hdr, ""}
+	if m.filterInput.Focused() {
+		headerLines = append(headerLines, m.filterInput.View())
+	} else if m.filterActive {
+		headerLines = append(headerLines, subtleStyle.Render(m.tr.Tf("filter: %s  (%d matches)", m.filterInput.Value(), len(items))))
+	}
+
+	// Dynamic column widths — NAME absorbs remaining space
+	colPID := 8
+	colCPU := 7
+	colMEM := 6
+	colRSS := 9
+	colUser := 10
+	colGap := 2
+	fixedW := 4 + colPID + colCPU + colMEM + colRSS + colUser + colGap*6 // sel marker + gaps
+	colName := max(innerW-fixedW, 12)
+
+	// Column headers with sort indicator
+	sortArrow := "▼"
+	cpuHeader := m.tr.T("CPU%")
+	memHeader := m.tr.T("MEM%")
+	pidHeader := m.tr.T("PID")
+	switch m.processSort {
+	case sortCPU:
+		cpuHeader += sortArrow
+	case sortMem:
+		memHeader += sortArrow
+	case sortPID:
+		pidHeader += sortArrow
+	}
+	hdrStyle := lipgloss.NewStyle().Bold(true).Underline(true).Foreground(CDim).Background(lipgloss.Color("#2A2A3E"))
+	headerLine := lipgloss.NewStyle().Width(colPID).Render(pidHeader) +
+		strings.Repeat(" ", colGap) +
+		lipgloss.NewStyle().Width(colCPU).Render(cpuHeader) +
+		strings.Repeat(" ", colGap) +
+		lipgloss.NewStyle().Width(colMEM).Render(memHeader) +
+		strings.Repeat(" ", colGap) +
+		lipgloss.NewStyle().Width(colRSS).Render(m.tr.T("RSS")) +
+		strings.Repeat(" ", colGap) +
+		lipgloss.NewStyle().Width(colUser).Render(m.tr.T("USER")) +
+		strings.Repeat(" ", colGap) +
+		lipgloss.NewStyle().Width(colName).Render(m.tr.T("NAME"))
+	headerLines = append(headerLines, hdrStyle.Width(innerW).Render("  "+headerLine))
+
+	selectedBg := lipgloss.Color("#2D4F67")
+	oddBg := lipgloss.Color("#1A1A2E")
+	evenBg := lipgloss.Color("#16213E")
+
+	// Render ALL process rows (viewport handles scrolling)
+	rowLines := make([]string, 0, len(items))
+	for idx := range items {
+		item := items[idx]
+		isSelected := idx == clampIndex(m.selected, len(items))
+		isIdle := item.CPUPercent == 0 && item.MemoryPercent == 0 && item.RSSBytes == 0
+
+		// Marker
+		marker := " "
+		if isSelected {
+			marker = lipgloss.NewStyle().Foreground(CCyan).Bold(true).Render("▶")
+		}
+
+		// Column rendering with per-column colors
+		pidS := lipgloss.NewStyle().Foreground(CBlue).Width(colPID).Render(fmt.Sprintf("%d", item.PID))
+
+		cpuColor := ThresholdColor(item.CPUPercent)
+		cpuS := lipgloss.NewStyle().Foreground(cpuColor).Width(colCPU).Render(fmt.Sprintf("%.1f%%", item.CPUPercent))
+
+		memColor := ThresholdColor(float64(item.MemoryPercent))
+		memS := lipgloss.NewStyle().Foreground(memColor).Width(colMEM).Render(fmt.Sprintf("%.1f%%", item.MemoryPercent))
+
+		rssS := lipgloss.NewStyle().Foreground(CDim).Width(colRSS).Render(formatBytes(item.RSSBytes))
+
+		userS := lipgloss.NewStyle().Foreground(CDim).Width(colUser).Render(truncate(firstNonEmpty(item.User, "-"), colUser))
+
+		nameS := lipgloss.NewStyle().Foreground(CText).Width(colName).Render(truncate(firstNonEmpty(item.Name, "-"), colName))
+
+		gap := strings.Repeat(" ", colGap)
+		row := " " + marker + " " + pidS + gap + cpuS + gap + memS + gap + rssS + gap + userS + gap + nameS
+
+		// Apply row-level styling
+		if isSelected {
+			row = lipgloss.NewStyle().Background(selectedBg).Width(innerW).Render(row)
+		} else if isIdle {
+			row = lipgloss.NewStyle().Foreground(CMuted).Background(
+				lipgloss.Color(map[int]lipgloss.Color{0: evenBg, 1: oddBg}[idx%2])).Width(innerW).Render(row)
+		} else {
+			bg := evenBg
+			if idx%2 == 1 {
+				bg = oddBg
+			}
+			row = lipgloss.NewStyle().Background(bg).Width(innerW).Render(row)
+		}
+
+		rowLines = append(rowLines, row)
+	}
+
+	// Selected process info — structured format (below viewport)
+	infoLine := ""
+	selected, ok := m.selectedProcess()
+	if ok {
+		stateColor := CMuted
+		switch strings.ToLower(firstNonEmpty(selected.State, "")) {
+		case "running", "run":
+			stateColor = COk
+		case "sleep", "sleeping":
+			stateColor = CInfo
+		case "stop", "stopped":
+			stateColor = CWarn
+		case "zombie":
+			stateColor = CCritical
+		}
+		infoLine = subtleStyle.Render("  "+m.tr.T("PID:")) + lipgloss.NewStyle().Foreground(CInfo).Render(fmt.Sprintf(" %d", selected.PID)) +
+			subtleStyle.Render("  "+m.tr.T("Name:")) + lipgloss.NewStyle().Foreground(CText).Bold(true).Render(" "+firstNonEmpty(selected.Name, "-")) +
+			subtleStyle.Render("  "+m.tr.T("State:")) + lipgloss.NewStyle().Foreground(stateColor).Render(" "+firstNonEmpty(selected.State, "-")) +
+			subtleStyle.Render("  "+m.tr.T("CPU:")) + lipgloss.NewStyle().Foreground(ThresholdColor(selected.CPUPercent)).Render(fmt.Sprintf(" %.1f%%", selected.CPUPercent)) +
+			subtleStyle.Render("  "+m.tr.T("Mem:")) + lipgloss.NewStyle().Foreground(ThresholdColor(float64(selected.MemoryPercent))).Render(fmt.Sprintf(" %.1f%%", selected.MemoryPercent)) +
+			subtleStyle.Render("  "+m.tr.T("RSS:")) + lipgloss.NewStyle().Foreground(CDim).Render(" "+formatBytes(selected.RSSBytes))
+	}
+
+	// Build viewport content: header + all rows
+	allLines := append(headerLines, rowLines...)
+	m.viewport.SetContent(strings.Join(allLines, "\n"))
+
+	// Wrap with panel border and info line below
+	viewportRender := m.viewport.View()
+	parts := []string{viewportRender}
+	if infoLine != "" {
+		parts = append(parts, "", infoLine)
+	}
+
+	fullPanel := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Padding(0, 1).
+		BorderForeground(CBorder).
+		Width(panelW)
+	return fullPanel.Render(strings.Join(parts, "\n"))
 }
+
+// ── Help View ────────────────────────────────────────────────────────
+
+func (m Model) renderHelp() string {
+	hdr := m.panelTitle("Help")
+	keys := []struct{ k, d string }{
+		{"q / ctrl+c", m.tr.T("quit")},
+		{"?", m.tr.T("toggle help")},
+		{"p", m.tr.T("pause/resume refresh")},
+		{"+ / -", m.tr.T("adjust refresh interval")},
+		{"r", m.tr.T("refresh now")},
+		{"tab", m.tr.T("switch overview / processes")},
+		{"up / down", m.tr.T("move process selection")},
+		{"s", m.tr.T("cycle process sort")},
+		{"t", m.tr.T("toggle tree view")},
+		{"/", m.tr.T("filter processes by name")},
+		{"k", m.tr.T("kill selected process")},
+		{"enter / y", m.tr.T("confirm kill")},
+		{"esc / n", m.tr.T("cancel")},
+	}
+	lines := []string{hdr, ""}
+	for _, k := range keys {
+		lines = append(lines, subtleStyle.Render("  ")+
+			lipgloss.NewStyle().Foreground(CPurple).Width(14).Render(k.k)+
+			subtleStyle.Render(k.d))
+	}
+	return outerStyle.Render(panelStyle.Render(strings.Join(lines, "\n")))
+}
+
+// ── Kill Confirm ─────────────────────────────────────────────────────
 
 func (m Model) renderKillConfirm() string {
 	target, ok := m.selectedProcess()
@@ -166,110 +908,154 @@ func (m Model) renderKillConfirm() string {
 		target = m.killTarget
 	}
 	lines := []string{
-		titleStyle.Render("confirm kill"),
+		m.panelTitle("Confirm Kill"),
 		"",
-		fmt.Sprintf("Send SIGTERM to PID %d (%s)?", target.PID, firstNonEmpty(target.Name, "-")),
+		lipgloss.NewStyle().Foreground(CText).Render(
+			fmt.Sprintf("  "+m.tr.T("Send SIGTERM to PID %d (%s)?"), target.PID, firstNonEmpty(target.Name, "-"))),
 		"",
-		warnStyle.Render("Enter / y to confirm"),
-		mutedStyle.Render("Esc / n to cancel"),
+		warnStyle.Render("  " + m.tr.T("Enter / y to confirm")),
+		subtleStyle.Render("  " + m.tr.T("Esc / n to cancel")),
 	}
-	return lipgloss.NewStyle().Padding(1, 2).Render(panelStyle.Render(strings.Join(lines, "\n")))
+	return outerStyle.Render(panelStyle.Render(strings.Join(lines, "\n")))
 }
+
+// ── Status & Footer ─────────────────────────────────────────────────
 
 func (m Model) statusLine() string {
-	parts := []string{m.stateLabel(), m.pageLabel()}
+	// State badge with color dot
+	state := m.stateLabel()
+	stateColor := m.stateColor()
+	dots := map[string]string{"ONLINE": "🟢", "PAUSED": "🟡", "ERROR": "🔴", "STALE": "🟠", "LOADING": "🔵"}
+	dot := dots[state]
+	if dot == "" {
+		dot = "⚪"
+	}
+	badge := lipgloss.NewStyle().Foreground(stateColor).Bold(true).Render(dot + " " + state)
+
+	page := "OVERVIEW"
 	if m.view == viewProcesses {
-		parts = append(parts, "sort="+string(m.processSort))
+		page = "PROCS"
 	}
+	pageStr := lipgloss.NewStyle().Foreground(CText).Bold(true).Render(page)
+
+	interval := subtleStyle.Render(m.tr.T("Interval:") + " " + m.refreshInterval.String())
+
+	// Sort info for processes view
+	sortStr := ""
+	if m.view == viewProcesses {
+		sortStr = subtleStyle.Render(" │ "+m.tr.T("Sort:")) + " " + lipgloss.NewStyle().Foreground(CInfo).Render(string(m.processSort)+" ▼")
+	}
+
+	// Left part
+	left := badge + subtleStyle.Render(" │ ") + pageStr + subtleStyle.Render(" │ ") + interval + sortStr
+
+	// Right part — timestamp
+	right := ""
 	if !m.lastUpdated.IsZero() {
-		parts = append(parts, "updated="+m.lastUpdated.Format("15:04:05"))
+		right = lipgloss.NewStyle().Foreground(CDim).Render(m.tr.T("Updated:") + " " + m.lastUpdated.Format("15:04:05"))
 	}
+
+	// Status text
 	if strings.TrimSpace(m.statusText) != "" {
-		parts = append(parts, m.statusText)
+		left += subtleStyle.Render(" │ ") + subtleStyle.Render(m.statusText)
 	}
-	parts = append(parts, "refresh="+refreshInterval.String())
-	return strings.Join(parts, " • ")
+
+	// Join left and right
+	w := max(m.width-4, 30)
+	leftRendered := lipgloss.NewStyle().Width(w / 2).Render(left)
+	rightRendered := lipgloss.NewStyle().Width(w / 2).Align(lipgloss.Right).Render(right)
+	return lipgloss.JoinHorizontal(lipgloss.Top, leftRendered, rightRendered)
 }
 
-func (m Model) footerHints() string {
-	if m.view == viewProcesses {
-		return "tab overview • ↑↓ select • s sort • k kill • r refresh • p pause • ? help • q quit"
+func (m Model) hintsForMode() string {
+	keyStyle := lipgloss.NewStyle().Foreground(CInfo)
+	dimStyle := lipgloss.NewStyle().Foreground(CMuted)
+
+	hint := func(key, desc string) string {
+		return keyStyle.Render("["+key+"]") + dimStyle.Render(desc+" ")
 	}
-	return "tab processes • r refresh • p pause • ? help • q quit"
+
+	switch {
+	case m.killConfirm:
+		return hint("enter/y", m.tr.T("confirm")) + hint("esc/n", m.tr.T("cancel"))
+	case m.filterInput.Focused():
+		return dimStyle.Render(m.tr.T("type to filter")+" ") + hint("enter", m.tr.T("confirm")) + hint("esc", m.tr.T("cancel"))
+	case m.view == viewProcesses:
+		base := hint("tab", m.tr.T("view")) + hint("↑↓", m.tr.T("select")) + hint("s", m.tr.T("sort")) + hint("t", m.tr.T("tree")) + hint("/", m.tr.T("filter")) + hint("k", "kill") + hint("p", m.tr.T("pause")) + hint("r", m.tr.T("refresh")) + hint("?", m.tr.T("help")) + hint("q", m.tr.T("exit"))
+		return base
+	default:
+		return hint("tab", m.tr.T("view")) + hint("+/-", m.tr.T("interval")) + hint("p", m.tr.T("pause")) + hint("r", m.tr.T("refresh")) + hint("?", m.tr.T("help")) + hint("q", m.tr.T("exit"))
+	}
 }
 
 func (m Model) pageLabel() string {
 	if m.view == viewProcesses {
-		return "PROCESSES"
+		return m.tr.T("PROCS")
 	}
-	return "OVERVIEW"
+	return m.tr.T("MAIN")
 }
 
 func (m Model) stateLabel() string {
 	switch {
 	case m.paused:
-		return "PAUSED"
+		return m.tr.T("PAUSED")
 	case !m.hasStats:
-		return "LOADING"
+		return m.tr.T("LOADING")
 	case m.statsErr != nil:
-		return "ERROR"
-	case !m.lastUpdated.IsZero() && time.Since(m.lastUpdated) > stateStaleAfter:
-		return "STALE"
+		return m.tr.T("ERROR")
+	case !m.lastUpdated.IsZero() && time.Since(m.lastUpdated) > 2*m.refreshInterval+time.Second:
+		return m.tr.T("STALE")
 	default:
-		return "LIVE"
+		return m.tr.T("ONLINE")
 	}
 }
 
 func (m Model) stateColor() lipgloss.Color {
 	switch m.stateLabel() {
-	case "LIVE":
-		return colorOK
+	case "ONLINE":
+		return CGreen
 	case "PAUSED", "STALE":
-		return colorWarn
+		return CYellow
 	case "ERROR":
-		return colorError
+		return CRed
 	default:
-		return colorInfo
+		return CBlue
 	}
 }
 
-func (m Model) renderBadge(label string, color lipgloss.Color) string {
+func (m Model) renderBadge(text string, color lipgloss.Color) string {
 	return lipgloss.NewStyle().
 		Foreground(color).
-		Border(lipgloss.RoundedBorder()).
+		Background(lipgloss.Color("#1a1b26")).
+		Bold(true).
 		Padding(0, 1).
-		Render(label)
+		Render(text)
 }
 
+// ── General Helpers ──────────────────────────────────────────────────
+
 func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			return value
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v != "" {
+			return v
 		}
 	}
 	return ""
 }
 
-func formatPercent(value float64) string {
-	if value < 0 {
-		return "-"
-	}
-	return fmt.Sprintf("%.1f%%", value)
-}
-
 func formatBytes(bytes uint64) string {
-	units := []string{"B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"}
+	units := []string{"B", "K", "M", "G", "T", "P"}
 	value := float64(bytes)
-	index := 0
-	for value >= 1024 && index < len(units)-1 {
+	i := 0
+	for value >= 1024 && i < len(units)-1 {
 		value /= 1024
-		index++
+		i++
 	}
-	if index == 0 {
-		return fmt.Sprintf("%d %s", bytes, units[index])
+	if i == 0 {
+		return fmt.Sprintf("%dB", bytes)
 	}
-	return fmt.Sprintf("%.1f %s", value, units[index])
+	return fmt.Sprintf("%.1f%s", value, units[i])
 }
 
 func formatUptime(seconds uint64) string {
@@ -309,9 +1095,82 @@ func renderPID(pid int32) string {
 	return fmt.Sprintf("%d", pid)
 }
 
-func minInt(a, b int) int {
-	if a < b {
-		return a
+// ── Math Helpers ─────────────────────────────────────────────────────
+
+func safePercent(used, total uint64) float64 {
+	if total == 0 {
+		return 0
 	}
-	return b
+	return (float64(used) / float64(total)) * 100
+}
+
+func avgFloat64(data []float64) float64 {
+	if len(data) == 0 {
+		return 0
+	}
+	var sum float64
+	for _, v := range data {
+		sum += v
+	}
+	return sum / float64(len(data))
+}
+
+func maxFloat64(data []float64) float64 {
+	if len(data) == 0 {
+		return 0
+	}
+	m := data[0]
+	for _, v := range data[1:] {
+		if v > m {
+			m = v
+		}
+	}
+	return m
+}
+
+// ── Network Helpers ──────────────────────────────────────────────────
+
+func ifacePriority(name string) int {
+	switch {
+	case strings.HasPrefix(name, "eth"), strings.HasPrefix(name, "en"):
+		return 0
+	case strings.HasPrefix(name, "wl"):
+		return 1
+	case strings.HasPrefix(name, "br"):
+		return 2
+	case strings.HasPrefix(name, "docker"):
+		return 3
+	case strings.HasPrefix(name, "veth"):
+		return 4
+	default:
+		return 5
+	}
+}
+
+func isPrivateIP(ip string) bool {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+	privateNets := []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8"}
+	for _, cidr := range privateNets {
+		_, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			continue
+		}
+		if network.Contains(parsed) {
+			return true
+		}
+	}
+	return false
+}
+
+func truncateIfaceName(name string, maxLen int) string {
+	if len(name) <= maxLen {
+		return name
+	}
+	if maxLen >= 10 {
+		return name[:maxLen-5] + "\u2026" + name[len(name)-4:]
+	}
+	return name[:maxLen-1] + "\u2026"
 }

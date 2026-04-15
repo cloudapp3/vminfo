@@ -11,16 +11,21 @@ const (
 )
 
 var (
-	Version     = "dev"
-	Commit      = "none"
-	BuildTime   = "unknown"
+	// Version is the application version injected at build time.
+	Version = "dev"
+	// Commit is the source revision injected at build time.
+	Commit = "none"
+	// BuildTime is the build timestamp injected at build time.
+	BuildTime = "unknown"
+	// Channel is the release channel injected at build time.
 	Channel     = "dev"
 	Repository  = DefaultRepositoryURL
 	Homepage    = DefaultHomepageURL
-	License     = ""
+	License     = "MIT"
 	Description = DefaultDescription
 )
 
+// AppMetadata describes build and repository metadata for the vminfo CLI.
 type AppMetadata struct {
 	Name          string `json:"name"`
 	Version       string `json:"version"`
@@ -34,6 +39,7 @@ type AppMetadata struct {
 	SchemaVersion string `json:"schema_version,omitempty"`
 }
 
+// Metadata returns normalized application metadata for CLI and embedding use.
 func Metadata() AppMetadata {
 	return AppMetadata{
 		Name:          AppName,

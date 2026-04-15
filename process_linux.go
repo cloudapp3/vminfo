@@ -60,6 +60,15 @@ func listProcesses(ctx context.Context) ([]ProcessInfo, error) {
 		if memPercent, err := activeProc.MemoryPercentWithContext(ctx); err == nil {
 			item.MemoryPercent = memPercent
 		}
+		if threads, err := activeProc.NumThreadsWithContext(ctx); err == nil {
+			item.Threads = threads
+		}
+		if nice, err := activeProc.NiceWithContext(ctx); err == nil {
+			item.Nice = int32(nice)
+		}
+		if createTime > 0 {
+			item.Uptime = uint64(time.Now().Unix() - createTime/1000)
+		}
 		items = append(items, item)
 	}
 

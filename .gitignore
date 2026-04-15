@@ -28,3 +28,6 @@ coverage-*.out
 AGENTS.md
 .lingma/
 .codex
+.claude/
+/scripts/
+sh/

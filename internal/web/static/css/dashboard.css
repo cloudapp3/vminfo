@@ -1,0 +1,258 @@
+/* --- Global --- */
+:root {
+    --bg: #0a0a0a;
+    --surface: #111111;
+    --surface-alt: #1a1a1a;
+    --border: #333333;
+    --text-primary: #e0e0e0;
+    --text-secondary: #aaaaaa;
+    --text-muted: #6c6c6c;
+    --green: #00ff87;
+    --yellow: #ffd700;
+    --orange: #ffaf5f;
+    --red: #ff5555;
+    --blue: #5fafff;
+    --pink: #ff79c6;
+    --font: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: var(--font);
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 8px;
+    overflow-x: hidden;
+}
+
+/* --- Header --- */
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 8px;
+}
+
+.logo {
+    color: var(--green);
+    font-weight: bold;
+    font-size: 15px;
+}
+
+.hostname {
+    color: var(--blue);
+    font-weight: bold;
+}
+
+.header-right {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.status-dot { margin-right: 4px; }
+.status-dot.connected { color: var(--green); }
+.status-dot.disconnected { color: var(--red); }
+.status-dot.connecting { color: var(--yellow); animation: blink 1s infinite; }
+
+.separator { color: var(--border); margin: 0 8px; }
+
+@keyframes blink { 50% { opacity: 0.3; } }
+
+/* --- Grid Layout --- */
+.grid-container {
+    display: grid;
+    grid-template-columns: 2fr 3fr;
+    gap: 8px;
+}
+
+.panel-full { grid-column: 1 / -1; }
+
+/* --- Panel --- */
+.panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.panel h2 {
+    font-size: 13px;
+    font-weight: normal;
+    color: var(--text-secondary);
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.panel h2 .icon { color: var(--green); }
+
+.panel-body { padding: 12px; }
+
+/* --- Info Table (System) --- */
+.info-table { width: 100%; }
+.info-table td { padding: 2px 0; }
+.info-table td:first-child { color: var(--text-muted); width: 80px; padding-right: 12px; }
+.info-table td:last-child { color: var(--text-primary); }
+
+/* --- Data Table (Disk I/O, Processes) --- */
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th {
+    color: var(--text-muted);
+    font-weight: normal;
+    text-align: left;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: var(--surface);
+}
+.data-table td { padding: 3px 8px; border-bottom: 1px solid #1a1a1a; }
+.data-table tbody tr:nth-child(odd) { background: var(--surface-alt); }
+.data-table tbody tr:hover { background: #222222; }
+
+/* --- Resources Panel --- */
+.resources-grid { display: flex; gap: 0; }
+.resources-left { flex: 0 0 42%; padding-right: 16px; }
+.resources-divider { width: 1px; background: var(--border); margin: 0 8px; }
+.resources-right { flex: 1; padding-left: 8px; }
+
+/* --- Progress Bar --- */
+.progress-row { margin-bottom: 10px; }
+.progress-label { display: inline-block; width: 45px; color: var(--text-muted); }
+.progress-track {
+    display: inline-block;
+    height: 16px;
+    background: #1a1a1a;
+    border-radius: 2px;
+    position: relative;
+    vertical-align: middle;
+    overflow: hidden;
+}
+.progress-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.5s ease, background-color 0.5s ease;
+}
+.progress-pct {
+    display: inline-block;
+    width: 50px;
+    text-align: right;
+    margin-left: 8px;
+}
+.progress-detail {
+    color: var(--text-muted);
+    font-size: 11px;
+    margin-left: 45px;
+    margin-top: 2px;
+}
+
+/* --- Sparkline (Canvas) --- */
+.sparkline-container { margin-bottom: 12px; }
+#cpu-sparkline {
+    width: 100%;
+    height: 40px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: #0d0d0d;
+}
+.cpu-stats { margin-top: 4px; color: var(--text-secondary); font-size: 12px; }
+.cpu-stats .stat-value { font-weight: bold; }
+.cpu-stats .stat-label { color: var(--text-muted); margin-right: 4px; }
+
+/* --- Cores Bar --- */
+.cores-container { display: flex; align-items: flex-end; gap: 6px; margin-top: 8px; }
+.core-col { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.core-bar {
+    width: 16px;
+    min-height: 4px;
+    max-height: 32px;
+    border-radius: 2px 2px 0 0;
+    transition: height 0.5s ease, background-color 0.5s ease;
+}
+.core-label { font-size: 10px; color: var(--text-muted); }
+.core-pct { font-size: 10px; }
+
+/* --- Network --- */
+.network-summary {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+}
+.net-stat { color: var(--text-secondary); }
+.net-stat .net-label { color: var(--text-muted); }
+.net-stat .net-down { color: var(--green); }
+.net-stat .net-up { color: var(--pink); }
+.network-interfaces {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 4px;
+}
+.net-iface { color: var(--text-secondary); padding: 2px 0; }
+.net-iface-name { color: var(--blue); display: inline-block; min-width: 120px; }
+
+/* --- Process Table --- */
+.process-table { font-size: 12px; }
+.proc-controls { margin-left: auto; display: flex; gap: 8px; }
+#proc-filter {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text-primary);
+    padding: 2px 8px;
+    font-family: var(--font);
+    font-size: 12px;
+    width: 160px;
+}
+#proc-sort {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text-primary);
+    font-family: var(--font);
+    font-size: 12px;
+}
+.col-pid  { width: 80px; text-align: right; }
+.col-cpu  { width: 70px; text-align: right; }
+.col-mem  { width: 70px; text-align: right; }
+.col-rss  { width: 80px; text-align: right; }
+.col-user { width: 100px; }
+.col-status { width: 30px; text-align: center; }
+.process-table td.col-pid  { color: var(--blue); text-align: right; }
+.process-table td.col-cpu  { text-align: right; }
+.process-table td.col-mem  { text-align: right; }
+.process-table td.col-rss  { text-align: right; color: var(--text-secondary); }
+.process-table td.col-user { color: var(--text-muted); }
+.process-table td.col-status { text-align: center; color: var(--text-muted); }
+.process-count {
+    color: var(--text-muted);
+    font-weight: normal;
+    margin-left: 8px;
+}
+
+/* --- Utility --- */
+.color-green  { color: var(--green); }
+.color-yellow { color: var(--yellow); }
+.color-orange { color: var(--orange); }
+.color-red    { color: var(--red); }
+.color-blue   { color: var(--blue); }
+.color-muted  { color: var(--text-muted); }
+
+/* --- Responsive --- */
+@media (max-width: 900px) {
+    .grid-container { grid-template-columns: 1fr; }
+    .resources-grid { flex-direction: column; }
+    .resources-divider { width: 100%; height: 1px; margin: 12px 0; }
+    .resources-left { flex: none; padding-right: 0; }
+}
