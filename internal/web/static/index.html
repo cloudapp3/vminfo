@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>vminfo Dashboard</title>
+    <link rel="stylesheet" href="/css/dashboard.css">
+</head>
+<body>
+    <header id="header">
+        <div class="header-left">
+            <span class="logo">vminfo</span>
+            <span class="separator">&middot;</span>
+            <span class="hostname" id="hostname">—</span>
+        </div>
+        <div class="header-right">
+            <span class="status-dot" id="ws-status">●</span>
+            <span id="ws-status-text">CONNECTING</span>
+            <span class="separator">│</span>
+            <span id="update-time">--:--:--</span>
+        </div>
+    </header>
+
+    <main class="grid-container">
+        <!-- Row 1: System + Disk I/O -->
+        <section class="panel" id="panel-system">
+            <h2><span class="icon">&#9672;</span> System</h2>
+            <div class="panel-body">
+                <table class="info-table" id="system-info"></table>
+            </div>
+        </section>
+
+        <section class="panel" id="panel-diskio">
+            <h2><span class="icon">&#9670;</span> Disk I/O</h2>
+            <div class="panel-body">
+                <table class="data-table" id="diskio-table"></table>
+            </div>
+        </section>
+
+        <!-- Row 2: Resources -->
+        <section class="panel panel-full" id="panel-resources">
+            <h2><span class="icon">&#9673;</span> Resources</h2>
+            <div class="panel-body resources-grid">
+                <div class="resources-left">
+                    <div class="progress-row" id="cpu-bar"></div>
+                    <div class="progress-row" id="mem-bar"></div>
+                    <div class="progress-row" id="swap-bar"></div>
+                    <div class="progress-row" id="disk-bar"></div>
+                </div>
+                <div class="resources-divider"></div>
+                <div class="resources-right">
+                    <div class="sparkline-container">
+                        <canvas id="cpu-sparkline" height="40"></canvas>
+                        <div class="cpu-stats" id="cpu-stats"></div>
+                    </div>
+                    <div class="cores-container" id="cores-bar"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Row 3: Network & Load -->
+        <section class="panel panel-full" id="panel-network">
+            <h2><span class="icon">&#9678;</span> Network &amp; Load</h2>
+            <div class="panel-body">
+                <div class="network-summary" id="network-summary"></div>
+                <div class="network-interfaces" id="network-interfaces"></div>
+            </div>
+        </section>
+
+        <!-- Row 4: Processes -->
+        <section class="panel panel-full" id="panel-processes">
+            <h2>
+                <span class="icon">&#128203;</span> Processes
+                <span class="process-count" id="proc-count"></span>
+                <div class="proc-controls">
+                    <input type="text" id="proc-filter" placeholder="Filter..." />
+                    <select id="proc-sort">
+                        <option value="cpu">CPU%</option>
+                        <option value="mem">MEM%</option>
+                        <option value="pid">PID</option>
+                        <option value="name">Name</option>
+                    </select>
+                </div>
+            </h2>
+            <div class="panel-body">
+                <table class="data-table process-table" id="proc-table">
+                    <thead>
+                        <tr>
+                            <th class="col-pid">PID</th>
+                            <th class="col-cpu">CPU%</th>
+                            <th class="col-mem">MEM%</th>
+                            <th class="col-rss">RSS</th>
+                            <th class="col-user">USER</th>
+                            <th class="col-status">ST</th>
+                            <th class="col-name">NAME</th>
+                        </tr>
+                    </thead>
+                    <tbody id="proc-tbody"></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <script src="/js/widgets.js"></script>
+    <script src="/js/websocket.js"></script>
+    <script src="/js/app.js"></script>
+</body>
+</html>

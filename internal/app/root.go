@@ -7,14 +7,20 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
+	"github.com/VPSMarket/vminfo"
+	"github.com/VPSMarket/vminfo/internal/collector"
+	"github.com/VPSMarket/vminfo/internal/i18n"
 	"github.com/VPSMarket/vminfo/internal/tui"
-	"github.com/VPSMarket/vminfo/pkg/vminfo"
+	"github.com/VPSMarket/vminfo/internal/web"
 )
 
 var ErrUsage = errors.New("usage")
@@ -29,47 +35,154 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	stdout = defaultWriter(stdout)
 	stderr = defaultWriter(stderr)
 
+	// Pre-scan global flags (--lang, --web, --port, --bind, --tui, --interval, --silent)
+	langFlag := ""
+	webMode := false
+	webPort := 9990
+	webBind := "127.0.0.1"
+	tuiMode := false
+	silent := false
+	webInterval := 3 * time.Second
+	filtered := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		switch {
+		case strings.HasPrefix(args[i], "--lang="):
+			langFlag = strings.TrimPrefix(args[i], "--lang=")
+		case args[i] == "--lang" && i+1 < len(args):
+			langFlag = args[i+1]
+			i++
+		case args[i] == "--web":
+			webMode = true
+		case strings.HasPrefix(args[i], "--port="):
+			if p, err := strconv.Atoi(strings.TrimPrefix(args[i], "--port=")); err == nil && p > 0 && p < 65536 {
+				webPort = p
+			}
+		case args[i] == "--port" && i+1 < len(args):
+			if p, err := strconv.Atoi(args[i+1]); err == nil && p > 0 && p < 65536 {
+				webPort = p
+			}
+			i++
+		case strings.HasPrefix(args[i], "--bind="):
+			webBind = strings.TrimPrefix(args[i], "--bind=")
+		case args[i] == "--bind" && i+1 < len(args):
+			webBind = args[i+1]
+			i++
+		case args[i] == "--tui":
+			tuiMode = true
+		case args[i] == "--silent", args[i] == "-s":
+			silent = true
+		case webMode && strings.HasPrefix(args[i], "--interval="):
+			if d, err := time.ParseDuration(strings.TrimPrefix(args[i], "--interval=")); err == nil {
+				webInterval = d
+			}
+		case webMode && args[i] == "--interval" && i+1 < len(args):
+			if d, err := time.ParseDuration(args[i+1]); err == nil {
+				webInterval = d
+			}
+			i++
+		default:
+			filtered = append(filtered, args[i])
+		}
+	}
+	args = filtered
+
+	// Detect locale: --lang > VMINFO_LANG > LANG/LC_ALL > default "en"
+	locale := i18n.Detect()
+	if langFlag != "" {
+		locale = strings.ToLower(strings.TrimSpace(langFlag))
+	}
+	tr := i18n.New(locale)
+
+	// Handle web mode
+	if webMode {
+		addr := fmt.Sprintf("%s:%d", webBind, webPort)
+		return runWeb(ctx, stdout, stderr, tr, addr, webInterval, tuiMode, silent)
+	}
+
 	if len(args) == 0 {
-		return runInfo(ctx, stdout)
+		return runInfo(ctx, stdout, tr)
 	}
 
 	cmd := strings.ToLower(strings.TrimSpace(args[0]))
 	if isHelpAlias(cmd) {
-		_, _ = io.WriteString(stdout, helpText())
+		_, _ = io.WriteString(stdout, helpText(tr))
 		return nil
 	}
 
 	switch cmd {
 	case "version", "--version":
-		return runVersion(stdout, stderr, args[1:])
+		return runVersion(stdout, stderr, args[1:], tr)
 	case "info":
-		return runInfo(ctx, stdout)
+		return runInfo(ctx, stdout, tr)
 	case "summary":
-		return runSummary(ctx, stdout, stderr, args[1:])
+		return runSummary(ctx, stdout, stderr, args[1:], tr)
 	case "watch":
-		return runWatch(ctx, stdout, stderr, args[1:])
+		return runWatch(ctx, stdout, stderr, args[1:], tr)
 	case "ps":
-		return runPS(ctx, stdout, stderr, args[1:])
+		return runPS(ctx, stdout, stderr, args[1:], tr)
 	case "kill":
-		return runKill(ctx, stdout, args[1:])
+		return runKill(ctx, stdout, args[1:], tr)
 	default:
-		_, _ = fmt.Fprintf(stderr, "unknown command: %s\n\n", cmd)
-		_, _ = io.WriteString(stderr, helpText())
+		_, _ = fmt.Fprintf(stderr, tr.T("unknown command: %s")+"\n\n", cmd)
+		_, _ = io.WriteString(stderr, helpText(tr))
 		return fmt.Errorf("%w: unknown command %q", ErrUsage, cmd)
 	}
 }
 
-func runInfo(ctx context.Context, w io.Writer) error {
-	return tui.Run(ctx, w)
+func runWeb(ctx context.Context, stdout, stderr io.Writer, tr *i18n.Translator, addr string, interval time.Duration, withTUI bool, silent bool) error {
+	col := collector.New(interval)
+	go col.Start(ctx)
+	defer col.Stop()
+
+	// Wait for first collection
+	time.Sleep(200 * time.Millisecond)
+
+	// Start web server
+	srv := web.NewServer(addr, col)
+	go func() {
+		if err := srv.Start(); err != nil {
+			fmt.Fprintf(stderr, "web server error: %v\n", err)
+		}
+	}()
+
+	if !silent {
+		fmt.Fprintf(stdout, "Web dashboard: http://%s\n", addr)
+	}
+
+	if withTUI {
+		if !silent {
+			fmt.Fprintf(stdout, "Starting TUI alongside web dashboard...\n")
+		}
+		return tui.Run(ctx, stdout, tr)
+	}
+
+	// Web-only mode: block until signal
+	if !silent {
+		fmt.Fprintf(stdout, "Press Ctrl+C to stop\n")
+	}
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+
+	if !silent {
+		fmt.Fprintf(stdout, "\nShutting down...\n")
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return srv.Shutdown(shutdownCtx)
 }
 
-func runSummary(ctx context.Context, stdout, stderr io.Writer, args []string) error {
+func runInfo(ctx context.Context, w io.Writer, tr *i18n.Translator) error {
+	return tui.Run(ctx, w, tr)
+}
+
+func runSummary(ctx context.Context, stdout, stderr io.Writer, args []string, tr *i18n.Translator) error {
 	fs := flag.NewFlagSet("summary", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var asJSON bool
 	var interval time.Duration
-	fs.BoolVar(&asJSON, "json", false, "write summary as JSON")
-	fs.DurationVar(&interval, "interval", vminfo.DefaultSampleInterval, "sampling interval")
+	fs.BoolVar(&asJSON, "json", false, tr.T("write summary as JSON"))
+	fs.DurationVar(&interval, "interval", vminfo.DefaultSampleInterval, tr.T("sampling interval"))
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -82,25 +195,25 @@ func runSummary(ctx context.Context, stdout, stderr io.Writer, args []string) er
 
 	staticInfo, stats, err := vminfo.CollectAll(ctx, vminfo.Options{SampleInterval: interval})
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to collect host info: %w", err)
 	}
 	if asJSON {
 		encoder := json.NewEncoder(stdout)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(vminfo.Snapshot{Static: staticInfo, Stats: stats})
 	}
-	return writeSummary(stdout, staticInfo, stats)
+	return writeSummary(stdout, staticInfo, stats, tr)
 }
 
-func runWatch(ctx context.Context, stdout, stderr io.Writer, args []string) error {
+func runWatch(ctx context.Context, stdout, stderr io.Writer, args []string, tr *i18n.Translator) error {
 	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var asJSON bool
 	var interval time.Duration
 	var count int
-	fs.BoolVar(&asJSON, "json", false, "write newline-delimited JSON snapshots")
-	fs.DurationVar(&interval, "interval", vminfo.DefaultSampleInterval, "sampling interval per snapshot")
-	fs.IntVar(&count, "count", 0, "number of snapshots to emit (0 means infinite)")
+	fs.BoolVar(&asJSON, "json", false, tr.T("write newline-delimited JSON snapshots"))
+	fs.DurationVar(&interval, "interval", vminfo.DefaultSampleInterval, tr.T("sampling interval per snapshot"))
+	fs.IntVar(&count, "count", 0, tr.T("number of snapshots to emit (0 means infinite)"))
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -118,7 +231,7 @@ func runWatch(ctx context.Context, stdout, stderr io.Writer, args []string) erro
 	for emitted := 0; count == 0 || emitted < count; emitted++ {
 		staticInfo, stats, err := vminfo.CollectAll(ctx, vminfo.Options{SampleInterval: interval})
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to collect host info: %w", err)
 		}
 		collectedAt := time.Now()
 		if asJSON {
@@ -136,20 +249,20 @@ func runWatch(ctx context.Context, stdout, stderr io.Writer, args []string) erro
 				return err
 			}
 		}
-		if err := writeWatchSnapshot(stdout, collectedAt, staticInfo, stats); err != nil {
+		if err := writeWatchSnapshot(stdout, collectedAt, staticInfo, stats, tr); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func runPS(ctx context.Context, stdout, stderr io.Writer, args []string) error {
+func runPS(ctx context.Context, stdout, stderr io.Writer, args []string, tr *i18n.Translator) error {
 	fs := flag.NewFlagSet("ps", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var asJSON bool
 	var sortKey string
-	fs.BoolVar(&asJSON, "json", false, "write process list as JSON")
-	fs.StringVar(&sortKey, "sort", "cpu", "sort key: cpu|mem|pid|name")
+	fs.BoolVar(&asJSON, "json", false, tr.T("write process list as JSON"))
+	fs.StringVar(&sortKey, "sort", "cpu", tr.T("sort key: cpu|mem|pid|name"))
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -162,7 +275,7 @@ func runPS(ctx context.Context, stdout, stderr io.Writer, args []string) error {
 
 	items, err := vminfo.ListProcesses(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to list processes: %w", err)
 	}
 	sortProcesses(items, sortKey)
 	if asJSON {
@@ -170,10 +283,10 @@ func runPS(ctx context.Context, stdout, stderr io.Writer, args []string) error {
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(items)
 	}
-	return writeProcesses(stdout, items)
+	return writeProcesses(stdout, items, tr)
 }
 
-func runKill(ctx context.Context, stdout io.Writer, args []string) error {
+func runKill(ctx context.Context, stdout io.Writer, args []string, tr *i18n.Translator) error {
 	if len(args) != 1 {
 		return fmt.Errorf("%w: kill requires exactly one pid", ErrUsage)
 	}
@@ -182,17 +295,17 @@ func runKill(ctx context.Context, stdout io.Writer, args []string) error {
 		return fmt.Errorf("%w: invalid pid %q", ErrUsage, args[0])
 	}
 	if err := vminfo.TerminateProcess(ctx, int32(pidValue)); err != nil {
-		return err
+		return fmt.Errorf("failed to terminate PID %d: %w", pidValue, err)
 	}
-	_, err = fmt.Fprintf(stdout, "sent SIGTERM to PID %d\n", pidValue)
+	_, err = fmt.Fprintf(stdout, tr.T("sent SIGTERM to PID %d")+"\n", pidValue)
 	return err
 }
 
-func runVersion(stdout, stderr io.Writer, args []string) error {
+func runVersion(stdout, stderr io.Writer, args []string, tr *i18n.Translator) error {
 	fs := flag.NewFlagSet("version", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var asJSON bool
-	fs.BoolVar(&asJSON, "json", false, "write version metadata as JSON")
+	fs.BoolVar(&asJSON, "json", false, tr.T("write version metadata as JSON"))
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -214,44 +327,44 @@ func runVersion(stdout, stderr io.Writer, args []string) error {
 		fmt.Sprintf("%s %s", meta.Name, meta.Version),
 	}
 	if meta.Commit != "" {
-		lines = append(lines, fmt.Sprintf("commit: %s", meta.Commit))
+		lines = append(lines, fmt.Sprintf(tr.T("commit:")+" %s", meta.Commit))
 	}
 	if meta.BuildTime != "" {
-		lines = append(lines, fmt.Sprintf("built:  %s", meta.BuildTime))
+		lines = append(lines, fmt.Sprintf(tr.T("built:")+"  %s", meta.BuildTime))
 	}
 	if meta.Channel != "" {
-		lines = append(lines, fmt.Sprintf("channel: %s", meta.Channel))
+		lines = append(lines, fmt.Sprintf(tr.T("channel:")+" %s", meta.Channel))
 	}
 	if meta.SchemaVersion != "" {
-		lines = append(lines, fmt.Sprintf("schema: %s", meta.SchemaVersion))
+		lines = append(lines, fmt.Sprintf(tr.T("schema:")+" %s", meta.SchemaVersion))
 	}
 	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
 	return err
 }
 
-func writeSummary(w io.Writer, staticInfo vminfo.StaticInfo, stats vminfo.RuntimeStats) error {
+func writeSummary(w io.Writer, staticInfo vminfo.StaticInfo, stats vminfo.RuntimeStats, tr *i18n.Translator) error {
 	lines := []string{
-		"Host Summary",
+		tr.T("Host Summary"),
 		"============",
-		fmt.Sprintf("Host     : %s", firstNonEmpty(staticInfo.Hostname, "-")),
-		fmt.Sprintf("OS       : %s", strings.TrimSpace(strings.Join([]string{firstNonEmpty(staticInfo.Platform, staticInfo.OS, "-"), strings.TrimSpace(staticInfo.OSVersion)}, " "))),
-		fmt.Sprintf("Kernel   : %s", firstNonEmpty(staticInfo.Kernel, "-")),
-		fmt.Sprintf("Arch     : %s", firstNonEmpty(staticInfo.Arch, "-")),
-		fmt.Sprintf("CPU      : %s (%d cores)", firstNonEmpty(staticInfo.CPUModel, "-"), staticInfo.CPUCores),
-		fmt.Sprintf("Memory   : %s used / %s total", formatBytes(stats.MemUsed), formatBytes(staticInfo.MemTotal)),
-		fmt.Sprintf("Swap     : %s used / %s total", formatBytes(stats.SwapUsed), formatBytes(staticInfo.SwapTotal)),
-		fmt.Sprintf("Disk     : %s used / %s total", formatBytes(stats.DiskUsed), formatBytes(staticInfo.DiskTotal)),
-		fmt.Sprintf("CPU      : %s", formatPercent(stats.CPU)),
-		fmt.Sprintf("Load     : %.2f %.2f %.2f", stats.Load1, stats.Load5, stats.Load15),
-		fmt.Sprintf("Network  : ↓ %s/s ↑ %s/s", formatBytes(stats.NetInSpeed), formatBytes(stats.NetOutSpeed)),
-		fmt.Sprintf("Conn     : tcp %d / udp %d / proc %d", stats.TCPCount, stats.UDPCount, stats.ProcessCount),
-		fmt.Sprintf("Uptime   : %s", formatUptime(stats.Uptime)),
+		fmt.Sprintf(tr.T("Host     :")+" %s", firstNonEmpty(staticInfo.Hostname, "-")),
+		fmt.Sprintf(tr.T("OS       :")+" %s", strings.TrimSpace(strings.Join([]string{firstNonEmpty(staticInfo.Platform, staticInfo.OS, "-"), strings.TrimSpace(staticInfo.OSVersion)}, " "))),
+		fmt.Sprintf(tr.T("Kernel   :")+" %s", firstNonEmpty(staticInfo.Kernel, "-")),
+		fmt.Sprintf(tr.T("Arch     :")+" %s", firstNonEmpty(staticInfo.Arch, "-")),
+		fmt.Sprintf(tr.T("CPU      :")+" %s ("+tr.T("%d cores")+")", firstNonEmpty(staticInfo.CPUModel, "-"), staticInfo.CPUCores),
+		fmt.Sprintf(tr.T("Memory   :")+" %s"+tr.T(" used / ")+"%s"+tr.T(" total"), formatBytes(stats.MemUsed), formatBytes(staticInfo.MemTotal)),
+		fmt.Sprintf(tr.T("Swap     :")+" %s"+tr.T(" used / ")+"%s"+tr.T(" total"), formatBytes(stats.SwapUsed), formatBytes(staticInfo.SwapTotal)),
+		fmt.Sprintf(tr.T("Disk     :")+" %s"+tr.T(" used / ")+"%s"+tr.T(" total"), formatBytes(stats.DiskUsed), formatBytes(staticInfo.DiskTotal)),
+		fmt.Sprintf(tr.T("CPU      :")+" %s", formatPercent(stats.CPU)),
+		fmt.Sprintf(tr.T("Load     :")+" %.2f %.2f %.2f", stats.Load1, stats.Load5, stats.Load15),
+		fmt.Sprintf(tr.T("Network  :")+" ↓ %s/s ↑ %s/s", formatBytes(stats.NetInSpeed), formatBytes(stats.NetOutSpeed)),
+		fmt.Sprintf(tr.T("Conn     :")+" tcp %d / udp %d / proc %d", stats.TCPCount, stats.UDPCount, stats.ProcessCount),
+		fmt.Sprintf(tr.T("Uptime   :")+" %s", formatUptime(stats.Uptime)),
 	}
 	_, err := fmt.Fprintln(w, strings.Join(lines, "\n"))
 	return err
 }
 
-func writeWatchSnapshot(w io.Writer, collectedAt time.Time, staticInfo vminfo.StaticInfo, stats vminfo.RuntimeStats) error {
+func writeWatchSnapshot(w io.Writer, collectedAt time.Time, staticInfo vminfo.StaticInfo, stats vminfo.RuntimeStats, tr *i18n.Translator) error {
 	osText := strings.TrimSpace(strings.Join([]string{
 		firstNonEmpty(staticInfo.Platform, staticInfo.OS, "-"),
 		strings.TrimSpace(staticInfo.OSVersion),
@@ -286,9 +399,9 @@ func writeWatchSnapshot(w io.Writer, collectedAt time.Time, staticInfo vminfo.St
 	return err
 }
 
-func writeProcesses(w io.Writer, items []vminfo.ProcessInfo) error {
+func writeProcesses(w io.Writer, items []vminfo.ProcessInfo, tr *i18n.Translator) error {
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
-	if _, err := fmt.Fprintln(tw, "PID\tPPID\tCPU%\tMEM%\tRSS\tUSER\tSTATE\tNAME"); err != nil {
+	if _, err := fmt.Fprintln(tw, tr.T("PID")+"\t"+tr.T("PPID")+"\t"+tr.T("CPU%")+"\t"+tr.T("MEM%")+"\t"+tr.T("RSS")+"\t"+tr.T("USER")+"\t"+tr.T("STATE")+"\t"+tr.T("NAME")); err != nil {
 		return err
 	}
 	for _, item := range items {
@@ -339,25 +452,37 @@ func sortProcesses(items []vminfo.ProcessInfo, sortKey string) {
 	})
 }
 
-func helpText() string {
+func helpText(tr *i18n.Translator) string {
 	return strings.Join([]string{
-		"Usage:",
-		"  vminfo                 start TUI",
-		"  vminfo info            start TUI (alias)",
-		"  vminfo version         show app version",
-		"  vminfo version --json  show app metadata as JSON",
-		"  vminfo summary         collect one snapshot",
-		"  vminfo summary --json  collect one snapshot as JSON",
-		"  vminfo watch           stream runtime snapshots",
-		"  vminfo watch --json    stream snapshots as JSON lines",
-		"  vminfo ps              list local processes",
-		"  vminfo ps --json       list local processes as JSON",
-		"  vminfo kill <pid>      send SIGTERM on Linux",
-		"  vminfo --version       show app version",
-		"  vminfo --help          show help",
+		tr.T("Usage:"),
+		"  vminfo                 " + tr.T("start TUI"),
+		"  vminfo info            " + tr.T("start TUI (alias)"),
+		"  vminfo --web           " + tr.T("start web dashboard"),
+		"  vminfo --web --tui     " + tr.T("start web + TUI"),
+		"  vminfo --web --port N  " + tr.T("web dashboard on port N (default 9990)"),
+		"  vminfo version         " + tr.T("show app version"),
+		"  vminfo version --json  " + tr.T("show app metadata as JSON"),
+		"  vminfo summary         " + tr.T("collect one snapshot"),
+		"  vminfo summary --json  " + tr.T("collect one snapshot as JSON"),
+		"  vminfo watch           " + tr.T("stream runtime snapshots"),
+		"  vminfo watch --json    " + tr.T("stream snapshots as JSON lines"),
+		"  vminfo ps              " + tr.T("list local processes"),
+		"  vminfo ps --json       " + tr.T("list local processes as JSON"),
+		"  vminfo kill <pid>      " + tr.T("send SIGTERM on Linux"),
+		"  vminfo --version       " + tr.T("show app version"),
+		"  vminfo --help          " + tr.T("show help"),
 		"",
-		"Status:",
-		"  TUI, summary, watch, ps, kill, and version are implemented.",
+		tr.T("Global options:"),
+		"  --lang <code>          " + tr.T("force language: en|zh|de|es|fr|ja|ko|pt|ru"),
+		"  --web                  " + tr.T("enable web dashboard"),
+		"  --port <N>             " + tr.T("web dashboard port (default 9990)"),
+		"  --bind <addr>          " + tr.T("bind address (default 127.0.0.1, use 0.0.0.0 for all)"),
+		"  --tui                  " + tr.T("start TUI alongside --web"),
+		"  --silent, -s           " + tr.T("suppress informational output"),
+		"  --interval <duration>  " + tr.T("refresh interval (default 3s)"),
+		"",
+		tr.T("Status:"),
+		"  " + tr.T("TUI, web, summary, watch, ps, kill, and version are implemented."),
 	}, "\n") + "\n"
 }
 

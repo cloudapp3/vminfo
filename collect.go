@@ -2,6 +2,8 @@ package vminfo
 
 import (
 	"context"
+	"net"
+	"strings"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -32,6 +34,19 @@ type netSample struct {
 	out uint64
 }
 
+type diskIOSample struct {
+	readBytes  uint64
+	writeBytes uint64
+	readCount  uint64
+	writeCount uint64
+}
+
+type netIfaceSample struct {
+	in  uint64
+	out uint64
+}
+
+// CollectStatic reads one set of static host details.
 func CollectStatic(ctx context.Context) (StaticInfo, error) {
 	base, err := readHostBase(ctx)
 	if err != nil {
@@ -40,6 +55,7 @@ func CollectStatic(ctx context.Context) (StaticInfo, error) {
 	return buildStaticInfo(ctx, base), nil
 }
 
+// CollectStats samples runtime metrics using the provided options.
 func CollectStats(ctx context.Context, opts Options) (RuntimeStats, error) {
 	base, err := readHostBase(ctx)
 	if err != nil {
@@ -48,6 +64,7 @@ func CollectStats(ctx context.Context, opts Options) (RuntimeStats, error) {
 	return buildRuntimeStats(ctx, withDefaults(opts), base)
 }
 
+// CollectAll returns both static host details and sampled runtime metrics.
 func CollectAll(ctx context.Context, opts Options) (StaticInfo, RuntimeStats, error) {
 	base, err := readHostBase(ctx)
 	if err != nil {
@@ -128,6 +145,8 @@ func buildRuntimeStats(ctx context.Context, opts Options, base hostBase) (Runtim
 	startCPU, cpuStartErr := readCPUSample(ctx)
 	startCores, coreStartErr := readCPUCoreSamples(ctx)
 	startNet, netStartErr := readNetSample(ctx)
+	startDiskIO, diskIOStartErr := readDiskIOSample(ctx)
+	startIfaces, ifaceStartErr := readNetIfaceSamples(ctx)
 	startTime := time.Now()
 	if err := sleepWithContext(ctx, opts.SampleInterval); err != nil {
 		return stats, err
@@ -136,6 +155,8 @@ func buildRuntimeStats(ctx context.Context, opts Options, base hostBase) (Runtim
 	endCPU, cpuEndErr := readCPUSample(ctx)
 	endCores, coreEndErr := readCPUCoreSamples(ctx)
 	endNet, netEndErr := readNetSample(ctx)
+	endDiskIO, diskIOEndErr := readDiskIOSample(ctx)
+	endIfaces, ifaceEndErr := readNetIfaceSamples(ctx)
 
 	if cpuStartErr == nil && cpuEndErr == nil {
 		stats.CPU = calcCPUUsage(startCPU, endCPU)
@@ -159,6 +180,18 @@ func buildRuntimeStats(ctx context.Context, opts Options, base hostBase) (Runtim
 		stats.NetIn = startNet.in
 		stats.NetOut = startNet.out
 	}
+
+	if diskIOStartErr == nil && diskIOEndErr == nil {
+		stats.DiskIO = calcDiskIOStats(startDiskIO, endDiskIO, elapsed)
+	}
+
+	if ifaceStartErr == nil && ifaceEndErr == nil {
+		addrs := readIfaceAddrs(ctx)
+		stats.Interfaces = calcIfaceSpeeds(startIfaces, endIfaces, addrs, elapsed)
+	}
+
+	stats.CPUFreqMHz = readCPUFreqFromBase(base.cpuInfos)
+	stats.Temps = readTemperatures(ctx)
 
 	if avg, err := load.AvgWithContext(ctx); err == nil {
 		stats.Load1 = avg.Load1
@@ -326,4 +359,146 @@ func readVirtualizationType() string {
 		return "-"
 	}
 	return system
+}
+
+func readDiskIOSample(ctx context.Context) (map[string]diskIOSample, error) {
+	counters, err := disk.IOCountersWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]diskIOSample, len(counters))
+	for name, c := range counters {
+		result[name] = diskIOSample{
+			readBytes:  c.ReadBytes,
+			writeBytes: c.WriteBytes,
+			readCount:  c.ReadCount,
+			writeCount: c.WriteCount,
+		}
+	}
+	return result, nil
+}
+
+func calcDiskIOStats(start, end map[string]diskIOSample, elapsed time.Duration) []DiskIOStats {
+	if elapsed <= 0 || len(end) == 0 {
+		return nil
+	}
+	seconds := elapsed.Seconds()
+	if seconds <= 0 {
+		return nil
+	}
+	result := make([]DiskIOStats, 0, len(end))
+	for name, e := range end {
+		s, ok := start[name]
+		if !ok {
+			continue
+		}
+		readSpeed := uint64(float64(diffUint64(e.readBytes, s.readBytes)) / seconds)
+		writeSpeed := uint64(float64(diffUint64(e.writeBytes, s.writeBytes)) / seconds)
+		readOps := uint64(float64(diffUint64(e.readCount, s.readCount)) / seconds)
+		writeOps := uint64(float64(diffUint64(e.writeCount, s.writeCount)) / seconds)
+		result = append(result, DiskIOStats{
+			Name:       name,
+			ReadBytes:  e.readBytes,
+			WriteBytes: e.writeBytes,
+			ReadSpeed:  readSpeed,
+			WriteSpeed: writeSpeed,
+			ReadCount:  e.readCount,
+			WriteCount: e.writeCount,
+			IOPS:       readOps + writeOps,
+		})
+	}
+	return result
+}
+
+func readCPUFreqFromBase(infos []cpu.InfoStat) float64 {
+	if len(infos) == 0 {
+		return 0
+	}
+	return infos[0].Mhz
+}
+
+func readTemperatures(ctx context.Context) []TempReading {
+	readings, err := host.SensorsTemperaturesWithContext(ctx)
+	if err != nil || len(readings) == 0 {
+		return nil
+	}
+	result := make([]TempReading, 0, len(readings))
+	for _, r := range readings {
+		if r.Temperature == 0 {
+			continue
+		}
+		tr := TempReading{
+			SensorKey:   r.SensorKey,
+			Temperature: r.Temperature,
+		}
+		if r.High > 0 {
+			tr.High = r.High
+		}
+		if r.Critical > 0 {
+			tr.Critical = r.Critical
+		}
+		result = append(result, tr)
+	}
+	return result
+}
+
+func readNetIfaceSamples(ctx context.Context) (map[string]netIfaceSample, error) {
+	counters, err := gnet.IOCountersWithContext(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]netIfaceSample, len(counters))
+	for _, c := range counters {
+		if c.Name == "lo" {
+			continue
+		}
+		result[c.Name] = netIfaceSample{in: c.BytesRecv, out: c.BytesSent}
+	}
+	return result, nil
+}
+
+func readIfaceAddrs(ctx context.Context) map[string]string {
+	ifaces, err := gnet.InterfacesWithContext(ctx)
+	if err != nil {
+		return nil
+	}
+	m := make(map[string]string, len(ifaces))
+	for _, iface := range ifaces {
+		for _, addr := range iface.Addrs {
+			ip := strings.SplitN(addr.Addr, "/", 2)[0]
+			if net.ParseIP(ip).To4() != nil {
+				m[iface.Name] = ip
+				break
+			}
+		}
+	}
+	return m
+}
+
+func calcIfaceSpeeds(start, end map[string]netIfaceSample, addrs map[string]string, elapsed time.Duration) []InterfaceIO {
+	if elapsed <= 0 || len(end) == 0 {
+		return nil
+	}
+	seconds := elapsed.Seconds()
+	if seconds <= 0 {
+		return nil
+	}
+	result := make([]InterfaceIO, 0, len(end))
+	for name, e := range end {
+		s, ok := start[name]
+		if !ok {
+			continue
+		}
+		rxSpeed := uint64(float64(diffUint64(e.in, s.in)) / seconds)
+		txSpeed := uint64(float64(diffUint64(e.out, s.out)) / seconds)
+		result = append(result, InterfaceIO{
+			Name:    name,
+			RxSpeed: rxSpeed,
+			TxSpeed: txSpeed,
+			IPv4:    addrs[name],
+			RxBytes: e.in,
+			TxBytes: e.out,
+		})
+	}
+	return result
 }
