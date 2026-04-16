@@ -95,6 +95,9 @@ vminfo ps              # Linux-only process list
 vminfo ps --json       # processes as JSON
 vminfo ps --sort mem   # sort by cpu|mem|pid|name
 vminfo kill <pid>      # SIGTERM a process (Linux)
+vminfo update          # check + install the latest tagged release
+vminfo update --check  # check without installing
+vminfo update --version v0.1.0
 vminfo version --json  # build metadata
 vminfo --lang zh       # switch UI language
 ```
@@ -124,6 +127,25 @@ Endpoints:
 - `GET /healthz` — health check
 - `GET /api/v1/snapshot` — current snapshot JSON
 - `GET /ws` — live WebSocket stream
+
+## Self-update
+
+Release builds can update themselves from GitHub Releases:
+
+```bash
+vminfo update
+vminfo update --check
+vminfo update --version v0.1.0
+```
+
+Notes:
+
+- Uses the repository configured in build metadata (default: `cloudapp3/vminfo`)
+- Respects `GITHUB_TOKEN` / `GH_TOKEN` for higher GitHub API limits
+- Update checks are cached at `$XDG_CACHE_HOME/vminfo/update-check.json` or `~/.cache/vminfo/update-check.json`
+- `vminfo update` installs the selected release in place; `vminfo update --check` only reports status
+- Development builds (`version=dev`) should use `--version vX.Y.Z` to install a tagged release
+- Windows currently supports `update --check`; in-place self-update is not supported yet
 
 Recent web UI polish:
 
@@ -185,6 +207,8 @@ Exported types: `StaticInfo` · `RuntimeStats` · `ProcessInfo` · `Snapshot` ·
 | TUI | ✅ | ✅ | ✅ |
 | Web dashboard | ✅ | ✅ | ✅ |
 | `ps` / `kill` | ✅ | ⚠️ stub | ⚠️ stub |
+| `update --check` | ✅ | ✅ | ✅ |
+| `update` install | ✅ | ✅ | ⚠️ check-only |
 
 TUI requires a real TTY. `ps` and `kill` are Linux-only by design.
 

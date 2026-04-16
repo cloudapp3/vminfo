@@ -91,6 +91,11 @@ type Model struct {
 	filterInput textinput.Model
 	viewport    viewport.Model
 	ready       bool // viewport initialized
+
+	// Render cache
+	sortedCache   []vminfo.ProcessInfo
+	filteredCache []vminfo.ProcessInfo
+	cacheDirty    bool
 }
 
 func Run(ctx context.Context, stdout io.Writer, tr *i18n.Translator) error {
@@ -208,7 +213,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.processErr = msg.err
 		if msg.err == nil {
 			m.processes = msg.items
-			m.selected = clampIndex(m.selected, len(m.processes))
+			m.refreshProcessListState()
 		}
 		return m, nil
 
@@ -233,7 +238,7 @@ func (m Model) handleMouseMsg(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.view != viewProcesses || m.killConfirm || m.showHelp {
 		return m, nil
 	}
-	items := m.filteredProcesses()
+	items := m.selectableProcesses()
 	if msg.Action == tea.MouseActionPress {
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
@@ -250,10 +255,7 @@ func (m Model) handleMouseMsg(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			// Header lines above the process rows:
 			// outer padding(1) + panel border-top(1) + title(1) + blank(1) +
 			// optional filter(0/1) + column header(1) = ~5-6
-			headerLines := 5
-			if m.filterInput.Focused() || m.filterActive {
-				headerLines++
-			}
+			headerLines := m.processHeaderLines()
 			row := msg.Y - headerLines
 			if row >= 0 && row+m.viewport.YOffset < len(items) {
 				m.selected = row + m.viewport.YOffset
@@ -291,16 +293,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.statusText = m.tr.T("filter cleared")
 			}
 			m.selected = 0
+			m.refreshProcessListState()
 			return m, nil
 		case "esc":
 			m.filterInput.Blur()
 			m.filterInput.SetValue("")
 			m.filterActive = false
 			m.statusText = m.tr.T("filter canceled")
+			m.refreshProcessListState()
 			return m, nil
 		default:
 			var cmd tea.Cmd
 			m.filterInput, cmd = m.filterInput.Update(msg)
+			m.refreshProcessListState()
 			return m, cmd
 		}
 	}
@@ -324,6 +329,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.filterInput.Focus()
 			m.filterInput.SetValue("")
 			m.statusText = m.tr.T("filter: (type to search, enter to apply)")
+			m.refreshProcessListState()
 		}
 		return m, nil
 	case "+", "=":
@@ -368,7 +374,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "down":
-		if m.view == viewProcesses && m.selected < len(m.processes)-1 {
+		if m.view == viewProcesses && m.selected < len(m.selectableProcesses())-1 {
 			m.selected++
 			m.syncViewport()
 		}
@@ -386,6 +392,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				m.statusText = m.tr.T("flat view")
 			}
+			m.refreshProcessListState()
 		}
 		return m, nil
 	case "k":
@@ -417,7 +424,7 @@ func (m *Model) syncViewport() {
 }
 
 func (m Model) selectedProcess() (vminfo.ProcessInfo, bool) {
-	items := m.sortedProcesses()
+	items := m.selectableProcesses()
 	if len(items) == 0 {
 		return vminfo.ProcessInfo{}, false
 	}
@@ -440,9 +447,86 @@ func (m *Model) cycleProcessSort() {
 		m.processSort = sortCPU
 		m.statusText = m.tr.T("sort: cpu")
 	}
+	m.refreshProcessListState()
+}
+
+func (m *Model) refreshProcessListState() {
+	m.rebuildProcessCache()
+	m.selected = clampIndex(m.selected, len(m.selectableProcesses()))
+	m.syncViewport()
+}
+
+func (m Model) processHeaderLines() int {
+	headerLines := 5
+	if !m.treeView && (m.filterInput.Focused() || m.filterActive) {
+		headerLines++
+	}
+	return headerLines
+}
+
+func (m Model) selectableProcesses() []vminfo.ProcessInfo {
+	if m.treeView {
+		nodes := m.flattenTree(m.buildProcessTree())
+		items := make([]vminfo.ProcessInfo, 0, len(nodes))
+		for _, node := range nodes {
+			items = append(items, node.proc)
+		}
+		return items
+	}
+	return m.filteredProcesses()
+}
+
+// rebuildProcessCache recomputes the sorted and filtered process caches.
+// Must be called from pointer-receiver contexts (Update handlers).
+func (m *Model) rebuildProcessCache() {
+	m.cacheDirty = false
+	items := append([]vminfo.ProcessInfo(nil), m.processes...)
+	sort.SliceStable(items, func(i, j int) bool {
+		left := items[i]
+		right := items[j]
+		switch m.processSort {
+		case sortMem:
+			if left.MemoryPercent != right.MemoryPercent {
+				return left.MemoryPercent > right.MemoryPercent
+			}
+		case sortPID:
+			if left.PID != right.PID {
+				return left.PID < right.PID
+			}
+		case sortName:
+			leftName := strings.ToLower(strings.TrimSpace(left.Name))
+			rightName := strings.ToLower(strings.TrimSpace(right.Name))
+			if leftName != rightName {
+				return leftName < rightName
+			}
+		default:
+			if left.CPUPercent != right.CPUPercent {
+				return left.CPUPercent > right.CPUPercent
+			}
+		}
+		return left.PID < right.PID
+	})
+	m.sortedCache = items
+
+	filterText := m.filterInput.Value()
+	if m.filterActive || (m.filterInput.Focused() && filterText != "") {
+		query := strings.ToLower(filterText)
+		filtered := make([]vminfo.ProcessInfo, 0, len(items))
+		for _, item := range items {
+			if strings.Contains(strings.ToLower(item.Name), query) {
+				filtered = append(filtered, item)
+			}
+		}
+		m.filteredCache = filtered
+	} else {
+		m.filteredCache = items
+	}
 }
 
 func (m Model) sortedProcesses() []vminfo.ProcessInfo {
+	if !m.cacheDirty && m.sortedCache != nil {
+		return m.sortedCache
+	}
 	items := append([]vminfo.ProcessInfo(nil), m.processes...)
 	sort.SliceStable(items, func(i, j int) bool {
 		left := items[i]
@@ -473,6 +557,9 @@ func (m Model) sortedProcesses() []vminfo.ProcessInfo {
 }
 
 func (m Model) filteredProcesses() []vminfo.ProcessInfo {
+	if !m.cacheDirty && m.filteredCache != nil {
+		return m.filteredCache
+	}
 	items := m.sortedProcesses()
 	filterText := m.filterInput.Value()
 	if !m.filterActive && !m.filterInput.Focused() || filterText == "" {

@@ -4,6 +4,8 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/cloudapp3/vminfo/internal/collector"
 )
 
 // wsClient wraps a websocket connection with a write mutex.
@@ -23,6 +25,9 @@ func (c *wsClient) writeMessage(msgType int, data []byte) error {
 }
 
 func (c *wsClient) close() {
+	if c == nil || c.conn == nil {
+		return
+	}
 	c.conn.Close()
 }
 
@@ -30,34 +35,57 @@ func (c *wsClient) close() {
 type WSHub struct {
 	mu      sync.RWMutex
 	clients map[*wsClient]bool
+	col     *collector.Collector
 }
 
-func newHub() *WSHub {
+func newHub(col *collector.Collector) *WSHub {
 	return &WSHub{
 		clients: make(map[*wsClient]bool),
+		col:     col,
 	}
 }
 
 func (h *WSHub) register(client *wsClient) {
+	var added bool
 	h.mu.Lock()
-	h.clients[client] = true
+	if !h.clients[client] {
+		h.clients[client] = true
+		added = true
+	}
 	h.mu.Unlock()
+	if added && h.col != nil {
+		h.col.RequestProcesses()
+	}
 }
 
 func (h *WSHub) unregister(client *wsClient) {
+	var removed bool
 	h.mu.Lock()
-	delete(h.clients, client)
+	if h.clients[client] {
+		delete(h.clients, client)
+		removed = true
+	}
 	h.mu.Unlock()
+	if !removed {
+		return
+	}
 	client.close()
+	if h.col != nil {
+		h.col.ReleaseProcesses()
+	}
 }
 
 func (h *WSHub) broadcast(data []byte) {
 	h.mu.RLock()
-	defer h.mu.RUnlock()
-
+	clients := make([]*wsClient, 0, len(h.clients))
 	for client := range h.clients {
+		clients = append(clients, client)
+	}
+	h.mu.RUnlock()
+
+	for _, client := range clients {
 		if err := client.writeMessage(websocket.TextMessage, data); err != nil {
-			go h.unregister(client)
+			h.unregister(client)
 		}
 	}
 }
