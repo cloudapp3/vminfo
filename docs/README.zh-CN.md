@@ -95,6 +95,9 @@ vminfo ps              # Linux-only 进程列表
 vminfo ps --json       # 进程列表 JSON
 vminfo ps --sort mem   # 按 cpu|mem|pid|name 排序
 vminfo kill <pid>      # 向进程发送 SIGTERM（Linux）
+vminfo update          # 检查并安装最新 tag 版本
+vminfo update --check  # 只检查，不安装
+vminfo update --version v0.1.0
 vminfo version --json  # 构建元数据
 vminfo --lang zh       # 切换 UI 语言
 ```
@@ -124,6 +127,25 @@ Web 模式下普通浏览访问保持安静：默认不再输出 HTTP 访问日�
 - `GET /healthz` — 健康检查
 - `GET /api/v1/snapshot` — 当前快照 JSON
 - `GET /ws` — 实时 WebSocket 流
+
+## 自更新
+
+Release 构建可直接从 GitHub Releases 自更新：
+
+```bash
+vminfo update
+vminfo update --check
+vminfo update --version v0.1.0
+```
+
+说明：
+
+- 默认读取构建元数据中的仓库地址（默认：`cloudapp3/vminfo`）
+- 支持 `GITHUB_TOKEN` / `GH_TOKEN`，可提升 GitHub API 限额
+- 更新检查缓存位于 `$XDG_CACHE_HOME/vminfo/update-check.json` 或 `~/.cache/vminfo/update-check.json`
+- `vminfo update` 会原地安装目标 release；`vminfo update --check` 只输出检查结果
+- 开发构建（`version=dev`）建议配合 `--version vX.Y.Z` 安装指定 tag
+- Windows 当前仅支持 `update --check`，暂不支持原地自更新
 
 近期 Web UI 微调：
 
@@ -185,6 +207,8 @@ func main() {
 | TUI | ✅ | ✅ | ✅ |
 | Web 仪表盘 | ✅ | ✅ | ✅ |
 | `ps` / `kill` | ✅ | ⚠️ stub | ⚠️ stub |
+| `update --check` | ✅ | ✅ | ✅ |
+| `update` 安装 | ✅ | ✅ | ⚠️ 仅检查 |
 
 TUI 需要真实 TTY。`ps` 和 `kill` 按设计仅 Linux 可用。
 

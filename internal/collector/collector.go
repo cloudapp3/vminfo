@@ -2,8 +2,10 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cloudapp3/vminfo"
@@ -14,17 +16,51 @@ const (
 	sampleInterval = 200 * time.Millisecond
 )
 
+// ringBuffer is a fixed-size circular buffer for float64 values.
+type ringBuffer struct {
+	data []float64
+	size int
+	head int
+	full bool
+}
+
+func newRingBuffer(size int) *ringBuffer {
+	return &ringBuffer{data: make([]float64, size), size: size}
+}
+
+func (r *ringBuffer) push(v float64) {
+	r.data[r.head] = v
+	r.head = (r.head + 1) % r.size
+	if r.head == 0 {
+		r.full = true
+	}
+}
+
+func (r *ringBuffer) slice() []float64 {
+	if !r.full {
+		out := make([]float64, r.head)
+		copy(out, r.data[:r.head])
+		return out
+	}
+	out := make([]float64, r.size)
+	copy(out, r.data[r.head:])
+	copy(out[r.size-r.head:], r.data[:r.head])
+	return out
+}
+
 // Collector periodically gathers system data and broadcasts snapshots.
 type Collector struct {
-	mu       sync.RWMutex
-	interval time.Duration
-	snapshot *Snapshot
-	history  []float64
+	mu         sync.RWMutex
+	interval   time.Duration
+	snapshot   *Snapshot
+	history    *ringBuffer
+	cachedJSON []byte // pre-serialized snapshot JSON
 
 	subMu sync.RWMutex
 	subs  map[string]chan *Snapshot
 
-	stopCh chan struct{}
+	stopCh        chan struct{}
+	procConsumers int32 // atomic: >0 means someone wants process data
 }
 
 // New creates a new Collector that refreshes at the given interval.
@@ -34,7 +70,7 @@ func New(interval time.Duration) *Collector {
 	}
 	return &Collector{
 		interval: interval,
-		history:  make([]float64, 0, maxCPUHistory),
+		history:  newRingBuffer(maxCPUHistory),
 		subs:     make(map[string]chan *Snapshot),
 		stopCh:   make(chan struct{}),
 	}
@@ -66,6 +102,73 @@ func (c *Collector) Latest() *Snapshot {
 	return c.snapshot
 }
 
+// LatestJSON returns the pre-serialized JSON of the latest snapshot.
+func (c *Collector) LatestJSON() []byte {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.cachedJSON
+}
+
+// LatestWithProcesses returns the most recent snapshot, hydrating process
+// details on demand when the cached snapshot only contains the total count.
+func (c *Collector) LatestWithProcesses(ctx context.Context) *Snapshot {
+	c.mu.RLock()
+	if c.snapshot == nil {
+		c.mu.RUnlock()
+		return nil
+	}
+	snap := *c.snapshot
+	c.mu.RUnlock()
+
+	if !needsProcessHydration(snap) {
+		return &snap
+	}
+
+	procs, err := vminfo.ListProcesses(ctx)
+	if err != nil {
+		return &snap
+	}
+
+	snap.Processes = ProcessInfo{
+		Total: len(procs),
+		List:  buildProcessEntries(procs),
+	}
+	return &snap
+}
+
+// LatestJSONWithProcesses returns the latest snapshot JSON, hydrating process
+// details on demand when the cached snapshot only contains the total count.
+func (c *Collector) LatestJSONWithProcesses(ctx context.Context) []byte {
+	c.mu.RLock()
+	if c.snapshot == nil {
+		c.mu.RUnlock()
+		return nil
+	}
+	snap := *c.snapshot
+	cached := c.cachedJSON
+	c.mu.RUnlock()
+
+	if !needsProcessHydration(snap) {
+		return cached
+	}
+
+	procs, err := vminfo.ListProcesses(ctx)
+	if err != nil {
+		return cached
+	}
+
+	snap.Processes = ProcessInfo{
+		Total: len(procs),
+		List:  buildProcessEntries(procs),
+	}
+
+	data, err := json.Marshal(snap)
+	if err != nil {
+		return cached
+	}
+	return data
+}
+
 // Start begins the collection loop. Blocks until Stop is called.
 func (c *Collector) Start(ctx context.Context) {
 	c.collectOnce(ctx)
@@ -93,6 +196,21 @@ func (c *Collector) Stop() {
 	}
 }
 
+// RequestProcesses increments the process consumer counter.
+// When the counter is >0, collectOnce will gather process data.
+func (c *Collector) RequestProcesses() {
+	atomic.AddInt32(&c.procConsumers, 1)
+}
+
+// ReleaseProcesses decrements the process consumer counter.
+func (c *Collector) ReleaseProcesses() {
+	atomic.AddInt32(&c.procConsumers, -1)
+}
+
+func needsProcessHydration(snap Snapshot) bool {
+	return snap.Processes.Total > len(snap.Processes.List)
+}
+
 func (c *Collector) collectOnce(ctx context.Context) {
 	staticInfo, stats, err := vminfo.CollectAll(ctx, vminfo.Options{SampleInterval: sampleInterval})
 	if err != nil {
@@ -100,23 +218,21 @@ func (c *Collector) collectOnce(ctx context.Context) {
 		return
 	}
 
-	// Collect processes (best-effort)
-	procs, _ := vminfo.ListProcesses(ctx)
-
-	// Update CPU history
-	c.mu.Lock()
-	c.history = append(c.history, stats.CPU)
-	if len(c.history) > maxCPUHistory {
-		c.history = c.history[len(c.history)-maxCPUHistory:]
+	// Collect processes only when a consumer has requested them
+	var procs []vminfo.ProcessInfo
+	if atomic.LoadInt32(&c.procConsumers) > 0 {
+		procs, _ = vminfo.ListProcesses(ctx)
 	}
-	historyCopy := make([]float64, len(c.history))
-	copy(historyCopy, c.history)
-	c.mu.Unlock()
+
+	// Update CPU history and snapshot in a single lock acquisition
+	c.history.push(stats.CPU)
+	historyCopy := c.history.slice()
 
 	snap := BuildSnapshot(staticInfo, stats, procs, historyCopy)
 
 	c.mu.Lock()
 	c.snapshot = &snap
+	c.cachedJSON, _ = json.Marshal(snap)
 	c.mu.Unlock()
 
 	// Broadcast to subscribers (non-blocking)

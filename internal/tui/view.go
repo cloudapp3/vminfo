@@ -848,13 +848,26 @@ func (m Model) renderProcessTree() string {
 		return panelStyle.Render(errorStyle.Render(m.processErr.Error()))
 	}
 	roots := m.buildProcessTree()
-	if len(roots) == 0 {
+	flatNodes := m.flattenTree(roots)
+	if len(flatNodes) == 0 {
 		return panelStyle.Render(m.spinner.View() + " " + subtleStyle.Render(m.tr.T("Loading...")))
 	}
+
+	w := m.width
+	if w <= 0 {
+		w = 120
+	}
+	panelW := max(w-4, 40)
+	innerW := max(panelW-4, 20)
+
 	hdr := m.panelTitle("Processes (tree)")
-	lines := []string{hdr, ""}
-	lines = append(lines, subtleStyle.Render(fmt.Sprintf("%-6s %5s %5s  %s", m.tr.T("PID"), m.tr.T("CPU%"), m.tr.T("MEM%"), m.tr.T("NAME"))))
+	headerLines := []string{hdr, ""}
+	headerLines = append(headerLines, subtleStyle.Render(fmt.Sprintf("%-6s %5s %5s  %s", m.tr.T("PID"), m.tr.T("CPU%"), m.tr.T("MEM%"), m.tr.T("NAME"))))
 	connectorColor := lipgloss.Color("#444444")
+	selectedBg := lipgloss.Color("#2D4F67")
+	selectedIndex := clampIndex(m.selected, len(flatNodes))
+	rowIndex := 0
+	rowLines := make([]string, 0, len(flatNodes))
 	var renderNodes func(nodes []treeNode, prefix string)
 	renderNodes = func(nodes []treeNode, prefix string) {
 		for i, node := range nodes {
@@ -873,7 +886,13 @@ func (m Model) renderProcessTree() string {
 				subtleStyle.Render(prefix) +
 				lipgloss.NewStyle().Foreground(connectorColor).Render(connector) +
 				lipgloss.NewStyle().Foreground(nameColor).Render(firstNonEmpty(node.proc.Name, "-"))
-			lines = append(lines, line)
+			if rowIndex == selectedIndex {
+				line = lipgloss.NewStyle().Background(selectedBg).Width(innerW).Render(line)
+			} else {
+				line = lipgloss.NewStyle().Width(innerW).Render(line)
+			}
+			rowIndex++
+			rowLines = append(rowLines, line)
 			childPrefix := prefix + "│ "
 			if i == len(nodes)-1 {
 				childPrefix = prefix + "  "
@@ -882,7 +901,43 @@ func (m Model) renderProcessTree() string {
 		}
 	}
 	renderNodes(roots, "")
-	return panelStyle.Render(strings.Join(lines, "\n"))
+
+	infoLine := ""
+	selected, ok := m.selectedProcess()
+	if ok {
+		stateColor := CMuted
+		switch strings.ToLower(firstNonEmpty(selected.State, "")) {
+		case "running", "run":
+			stateColor = COk
+		case "sleep", "sleeping":
+			stateColor = CInfo
+		case "stop", "stopped":
+			stateColor = CWarn
+		case "zombie":
+			stateColor = CCritical
+		}
+		infoLine = subtleStyle.Render("  "+m.tr.T("PID:")) + lipgloss.NewStyle().Foreground(CInfo).Render(fmt.Sprintf(" %d", selected.PID)) +
+			subtleStyle.Render("  "+m.tr.T("Name:")) + lipgloss.NewStyle().Foreground(CText).Bold(true).Render(" "+firstNonEmpty(selected.Name, "-")) +
+			subtleStyle.Render("  "+m.tr.T("State:")) + lipgloss.NewStyle().Foreground(stateColor).Render(" "+firstNonEmpty(selected.State, "-")) +
+			subtleStyle.Render("  "+m.tr.T("CPU:")) + lipgloss.NewStyle().Foreground(ThresholdColor(selected.CPUPercent)).Render(fmt.Sprintf(" %.1f%%", selected.CPUPercent)) +
+			subtleStyle.Render("  "+m.tr.T("Mem:")) + lipgloss.NewStyle().Foreground(ThresholdColor(float64(selected.MemoryPercent))).Render(fmt.Sprintf(" %.1f%%", selected.MemoryPercent)) +
+			subtleStyle.Render("  "+m.tr.T("RSS:")) + lipgloss.NewStyle().Foreground(CDim).Render(" "+formatBytes(selected.RSSBytes))
+	}
+
+	allLines := append(headerLines, rowLines...)
+	m.viewport.SetContent(strings.Join(allLines, "\n"))
+
+	parts := []string{m.viewport.View()}
+	if infoLine != "" {
+		parts = append(parts, "", infoLine)
+	}
+
+	fullPanel := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Padding(0, 1).
+		BorderForeground(CBorder).
+		Width(panelW)
+	return fullPanel.Render(strings.Join(parts, "\n"))
 }
 
 func (m Model) renderProcesses() string {
@@ -894,6 +949,9 @@ func (m Model) renderProcesses() string {
 	}
 	items := m.filteredProcesses()
 	if len(items) == 0 {
+		if len(m.processes) > 0 {
+			return panelStyle.Render(subtleStyle.Render(m.tr.T("No matching processes")))
+		}
 		return panelStyle.Render(m.spinner.View() + " " + subtleStyle.Render(m.tr.T("Loading...")))
 	}
 

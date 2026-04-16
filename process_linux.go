@@ -34,43 +34,60 @@ func listProcesses(ctx context.Context) ([]ProcessInfo, error) {
 	}
 
 	nextCache := make(map[int32]cachedProcess, len(procs))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 32) // concurrency limit
 	items := make([]ProcessInfo, 0, len(procs))
+
 	for _, procItem := range procs {
 		if procItem == nil || procItem.Pid <= 0 {
 			continue
 		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(p *process.Process) {
+			defer wg.Done()
+			defer func() { <-sem }()
 
-		activeProc, createTime := resolveActiveProcess(ctx, procItem)
-		if activeProc == nil || createTime <= 0 {
-			continue
-		}
-		nextCache[activeProc.Pid] = cachedProcess{createTime: createTime, proc: activeProc}
+			activeProc, createTime := resolveActiveProcess(ctx, p)
+			if activeProc == nil || createTime <= 0 {
+				return
+			}
 
-		item := ProcessInfo{
-			PID:        activeProc.Pid,
-			Name:       readProcessName(ctx, activeProc),
-			User:       readProcessUser(ctx, activeProc),
-			State:      readProcessState(ctx, activeProc),
-			CPUPercent: readProcessCPU(ctx, activeProc),
-			RSSBytes:   readProcessRSS(ctx, activeProc),
-		}
-		if ppid, err := activeProc.PpidWithContext(ctx); err == nil {
-			item.PPID = ppid
-		}
-		if memPercent, err := activeProc.MemoryPercentWithContext(ctx); err == nil {
-			item.MemoryPercent = memPercent
-		}
-		if threads, err := activeProc.NumThreadsWithContext(ctx); err == nil {
-			item.Threads = threads
-		}
-		if nice, err := activeProc.NiceWithContext(ctx); err == nil {
-			item.Nice = int32(nice)
-		}
-		if createTime > 0 {
-			item.Uptime = uint64(time.Now().Unix() - createTime/1000)
-		}
-		items = append(items, item)
+			mu.Lock()
+			nextCache[activeProc.Pid] = cachedProcess{createTime: createTime, proc: activeProc}
+			mu.Unlock()
+
+			item := ProcessInfo{
+				PID:        activeProc.Pid,
+				Name:       readProcessName(ctx, activeProc),
+				User:       readProcessUser(ctx, activeProc),
+				State:      readProcessState(ctx, activeProc),
+				CPUPercent: readProcessCPU(ctx, activeProc),
+				RSSBytes:   readProcessRSS(ctx, activeProc),
+			}
+			if ppid, err := activeProc.PpidWithContext(ctx); err == nil {
+				item.PPID = ppid
+			}
+			if memPercent, err := activeProc.MemoryPercentWithContext(ctx); err == nil {
+				item.MemoryPercent = memPercent
+			}
+			if threads, err := activeProc.NumThreadsWithContext(ctx); err == nil {
+				item.Threads = threads
+			}
+			if nice, err := activeProc.NiceWithContext(ctx); err == nil {
+				item.Nice = int32(nice)
+			}
+			if createTime > 0 {
+				item.Uptime = uint64(time.Now().Unix() - createTime/1000)
+			}
+
+			mu.Lock()
+			items = append(items, item)
+			mu.Unlock()
+		}(procItem)
 	}
+	wg.Wait()
 
 	processCache.mu.Lock()
 	processCache.items = nextCache

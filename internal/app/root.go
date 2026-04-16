@@ -124,6 +124,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runPS(ctx, stdout, stderr, args[1:], tr)
 	case "kill":
 		return runKill(ctx, stdout, args[1:], tr)
+	case "update":
+		return runUpdate(ctx, stdout, stderr, args[1:], tr)
 	default:
 		_, _ = fmt.Fprintf(stderr, tr.T("unknown command: %s")+"\n\n", cmd)
 		_, _ = io.WriteString(stderr, helpText(tr))
@@ -640,6 +642,8 @@ func helpText(tr *i18n.Translator) string {
 		"  vminfo ps              " + tr.T("list local processes"),
 		"  vminfo ps --json       " + tr.T("list local processes as JSON"),
 		"  vminfo kill <pid>      " + tr.T("send SIGTERM on Linux"),
+		"  vminfo update          " + tr.T("check for and install updates"),
+		"  vminfo update --check  " + tr.T("check for updates without installing"),
 		"  vminfo --version       " + tr.T("show app version"),
 		"  vminfo --help          " + tr.T("show help"),
 		"",
@@ -653,7 +657,7 @@ func helpText(tr *i18n.Translator) string {
 		"  --interval <duration>  " + tr.T("refresh interval (default 3s)"),
 		"",
 		tr.T("Status:"),
-		"  " + tr.T("TUI, web, summary, watch, ps, kill, and version are implemented."),
+		"  " + tr.T("TUI, web, summary, watch, ps, kill, update, and version are implemented."),
 	}, "\n") + "\n"
 }
 

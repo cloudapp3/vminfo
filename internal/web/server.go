@@ -1,12 +1,14 @@
 package web
 
 import (
+	"compress/gzip"
 	"context"
 	"embed"
 	"encoding/json"
 	"io/fs"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/websocket"
 
@@ -29,7 +31,7 @@ func NewServer(addr string, c *collector.Collector) *Server {
 	return &Server{
 		addr:      addr,
 		collector: c,
-		hub:       newHub(),
+		hub:       newHub(c),
 	}
 }
 
@@ -77,12 +79,10 @@ func (s *Server) broadcastLoop() {
 	ch := s.collector.Subscribe("web-hub")
 	defer s.collector.Unsubscribe("web-hub")
 
-	for snap := range ch {
-		data, err := json.Marshal(snap)
-		if err != nil {
-			continue
+	for range ch {
+		if data := s.collector.LatestJSON(); data != nil {
+			s.hub.broadcast(data)
 		}
-		s.hub.broadcast(data)
 	}
 }
 
@@ -93,12 +93,12 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	snap := s.collector.Latest()
+	snap := s.collector.LatestWithProcesses(r.Context())
 	if snap == nil {
 		http.Error(w, "no data yet", http.StatusServiceUnavailable)
 		return
 	}
-	writeJSON(w, snap)
+	writeJSONGzip(w, r, snap)
 }
 
 func (s *Server) handleCPU(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +107,7 @@ func (s *Server) handleCPU(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no data yet", http.StatusServiceUnavailable)
 		return
 	}
-	writeJSON(w, snap.CPU)
+	writeJSONGzip(w, r, snap.CPU)
 }
 
 func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
@@ -116,7 +116,7 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no data yet", http.StatusServiceUnavailable)
 		return
 	}
-	writeJSON(w, snap.Memory)
+	writeJSONGzip(w, r, snap.Memory)
 }
 
 func (s *Server) handleDisk(w http.ResponseWriter, r *http.Request) {
@@ -125,7 +125,7 @@ func (s *Server) handleDisk(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no data yet", http.StatusServiceUnavailable)
 		return
 	}
-	writeJSON(w, snap.Disk)
+	writeJSONGzip(w, r, snap.Disk)
 }
 
 func (s *Server) handleNetwork(w http.ResponseWriter, r *http.Request) {
@@ -134,16 +134,16 @@ func (s *Server) handleNetwork(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no data yet", http.StatusServiceUnavailable)
 		return
 	}
-	writeJSON(w, snap.Network)
+	writeJSONGzip(w, r, snap.Network)
 }
 
 func (s *Server) handleProcesses(w http.ResponseWriter, r *http.Request) {
-	snap := s.collector.Latest()
+	snap := s.collector.LatestWithProcesses(r.Context())
 	if snap == nil {
 		http.Error(w, "no data yet", http.StatusServiceUnavailable)
 		return
 	}
-	writeJSON(w, snap.Processes)
+	writeJSONGzip(w, r, snap.Processes)
 }
 
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
@@ -152,11 +152,11 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no data yet", http.StatusServiceUnavailable)
 		return
 	}
-	writeJSON(w, snap.System)
+	writeJSONGzip(w, r, snap.System)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]interface{}{
+	writeJSONGzip(w, r, map[string]interface{}{
 		"status":     "ok",
 		"ws_clients": s.hub.clientCount(),
 	})
@@ -178,10 +178,12 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	client := newWSClient(conn)
 	s.hub.register(client)
 
-	// Send current snapshot immediately (through the mutex-protected path)
-	if snap := s.collector.Latest(); snap != nil {
-		data, _ := json.Marshal(snap)
-		client.writeMessage(websocket.TextMessage, data)
+	// Send current snapshot immediately
+	if data := s.collector.LatestJSONWithProcesses(r.Context()); data != nil {
+		if err := client.writeMessage(websocket.TextMessage, data); err != nil {
+			s.hub.unregister(client)
+			return
+		}
 	}
 
 	// Read loop (handles close/ping)
@@ -197,6 +199,19 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 func writeJSON(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(v)
+}
+
+// writeJSONGzip writes JSON with optional gzip compression.
+func writeJSONGzip(w http.ResponseWriter, r *http.Request, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		w.Header().Set("Content-Encoding", "gzip")
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+		json.NewEncoder(gz).Encode(v)
+		return
+	}
 	json.NewEncoder(w).Encode(v)
 }
 

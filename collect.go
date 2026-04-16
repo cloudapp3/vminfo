@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -22,6 +23,43 @@ type hostBase struct {
 	swapInfo  *mem.SwapMemoryStat
 	diskTotal uint64
 	diskUsed  uint64
+}
+
+// staticCache caches rarely-changing host data (host info, CPU info, disk totals)
+// so they are not re-read from /proc on every collection cycle.
+type staticCache struct {
+	mu        sync.RWMutex
+	base      *hostBase
+	static    *StaticInfo
+	expiresAt time.Time
+	ttl       time.Duration
+}
+
+var defaultStaticCache = &staticCache{ttl: 60 * time.Second}
+
+func (sc *staticCache) get(ctx context.Context) (StaticInfo, hostBase, error) {
+	sc.mu.RLock()
+	if sc.base != nil && sc.static != nil && time.Now().Before(sc.expiresAt) {
+		base := *sc.base
+		static := *sc.static
+		sc.mu.RUnlock()
+		return static, base, nil
+	}
+	sc.mu.RUnlock()
+
+	base, err := readHostBase(ctx)
+	if err != nil {
+		return StaticInfo{}, hostBase{}, err
+	}
+	static := buildStaticInfo(ctx, base)
+
+	sc.mu.Lock()
+	sc.base = &base
+	sc.static = &static
+	sc.expiresAt = time.Now().Add(sc.ttl)
+	sc.mu.Unlock()
+
+	return static, base, nil
 }
 
 type cpuSample struct {
@@ -52,16 +90,18 @@ type netIfaceSample struct {
 
 // CollectStatic reads one set of static host details.
 func CollectStatic(ctx context.Context) (StaticInfo, error) {
-	base, err := readHostBase(ctx)
-	if err != nil {
-		return StaticInfo{}, err
-	}
-	return buildStaticInfo(ctx, base), nil
+	static, _, err := defaultStaticCache.get(ctx)
+	return static, err
 }
 
 // CollectStats samples runtime metrics using the provided options.
+// Uses cached static data; reads only dynamic data (mem/swap) fresh each call.
 func CollectStats(ctx context.Context, opts Options) (RuntimeStats, error) {
-	base, err := readHostBase(ctx)
+	_, base, err := defaultStaticCache.get(ctx)
+	if err != nil {
+		return RuntimeStats{}, err
+	}
+	base, err = refreshDynamicBase(ctx, base)
 	if err != nil {
 		return RuntimeStats{}, err
 	}
@@ -69,17 +109,21 @@ func CollectStats(ctx context.Context, opts Options) (RuntimeStats, error) {
 }
 
 // CollectAll returns both static host details and sampled runtime metrics.
+// Uses cached static data; reads only dynamic data (mem/swap) fresh each call.
 func CollectAll(ctx context.Context, opts Options) (StaticInfo, RuntimeStats, error) {
-	base, err := readHostBase(ctx)
+	static, base, err := defaultStaticCache.get(ctx)
 	if err != nil {
 		return StaticInfo{}, RuntimeStats{}, err
 	}
-	staticInfo := buildStaticInfo(ctx, base)
+	base, err = refreshDynamicBase(ctx, base)
+	if err != nil {
+		return static, RuntimeStats{}, err
+	}
 	stats, err := buildRuntimeStats(ctx, withDefaults(opts), base)
 	if err != nil {
-		return staticInfo, RuntimeStats{}, err
+		return static, RuntimeStats{}, err
 	}
-	return staticInfo, stats, nil
+	return static, stats, nil
 }
 
 func withDefaults(opts Options) Options {
@@ -87,6 +131,30 @@ func withDefaults(opts Options) Options {
 		opts.SampleInterval = DefaultSampleInterval
 	}
 	return opts
+}
+
+func refreshDynamicBase(ctx context.Context, base hostBase) (hostBase, error) {
+	memInfo, err := mem.VirtualMemoryWithContext(ctx)
+	if err != nil {
+		return hostBase{}, err
+	}
+	swapInfo, _ := mem.SwapMemoryWithContext(ctx)
+	if swapInfo == nil {
+		swapInfo = &mem.SwapMemoryStat{}
+	}
+	base.memInfo = memInfo
+	base.swapInfo = swapInfo
+
+	if base.hostInfo != nil {
+		hostInfo := *base.hostInfo
+		if uptime, err := host.UptimeWithContext(ctx); err == nil {
+			hostInfo.Uptime = uptime
+		}
+		base.hostInfo = &hostInfo
+	}
+
+	_, base.diskUsed = readDiskTotals(ctx)
+	return base, nil
 }
 
 func readHostBase(ctx context.Context) (hostBase, error) {
@@ -203,8 +271,8 @@ func buildRuntimeStats(ctx context.Context, opts Options, base hostBase) (Runtim
 		stats.Load15 = avg.Load15
 	}
 
-	stats.TCPCount = countConnections(ctx, "tcp")
-	stats.UDPCount = countConnections(ctx, "udp")
+	stats.TCPCount = countTCPConnections()
+	stats.UDPCount = countUDPConnections()
 	stats.ProcessCount = countProcesses(ctx)
 	return stats, nil
 }
@@ -325,14 +393,6 @@ func readDiskTotals(ctx context.Context) (uint64, uint64) {
 		used += usage.Used
 	}
 	return total, used
-}
-
-func countConnections(ctx context.Context, kind string) uint32 {
-	conns, err := gnet.ConnectionsWithContext(ctx, kind)
-	if err != nil {
-		return 0
-	}
-	return uint32(len(conns))
 }
 
 func countProcesses(ctx context.Context) uint32 {
