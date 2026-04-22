@@ -122,7 +122,6 @@
   "send SIGTERM on Linux": "SIGTERM 전송 (Linux)",
   "show help": "도움말 표시",
   "Status:": "상태:",
-  "TUI, summary, watch, ps, kill, and version are implemented.": "TUI, summary, watch, ps, kill, version이 구현되어 있습니다.",
   "write summary as JSON": "요약 JSON 출력",
   "sampling interval": "샘플링 간격",
   "write newline-delimited JSON snapshots": "JSON 라인 스냅샷 출력",
@@ -151,5 +150,18 @@
   "commit:": "커밋:",
   "built:": "빌드:",
   "channel:": "채널:",
-  "schema:": "스키마:"
+  "schema:": "스키마:",
+  "check for updates without installing": "설치하지 않고 업데이트 확인",
+  "install or inspect a specific release tag": "특정 릴리스 태그 설치 또는 확인",
+  "already on requested version: %s": "요청한 버전이 이미 설치됨: %s",
+  "requested version %s is not newer than current %s": "요청한 버전 %s이(가) 현재 %s보다 최신이 아님",
+  "already up to date: %s": "이미 최신 버전임: %s",
+  "updating from %s to %s": "%s에서 %s(으)로 업데이트 중",
+  "updated successfully to %s": "%s(으)로 업데이트 완료",
+  "target release available: %s (current %s)": "대상 릴리스 사용 가능: %s (현재 %s)",
+  "update available: %s (current %s)": "업데이트 가능: %s (현재 %s)",
+  "check for and install updates": "업데이트 확인 및 설치",
+  "skip background update check": "백그라운드 업데이트 확인 건너뛰기",
+  "TUI, web, summary, watch, ps, kill, update, and version are implemented.": "TUI, web, summary, watch, ps, kill, update, version이 구현되어 있습니다.",
+  "A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.": "vminfo 새 버전이 있습니다: %s (현재: %s). 'vminfo update'를 실행하여 업그레이드하세요."
 }

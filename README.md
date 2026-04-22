@@ -8,9 +8,9 @@
 
 中文说明：[docs/README.zh-CN.md](docs/README.zh-CN.md)
 
-## Demo
+## Preview
 
-![vminfo demo](docs/assets/tui-demo.gif)
+![vminfo preview](docs/assets/tui-demo.gif)
 
 > Screens may vary slightly by terminal width, font, and theme.
 
@@ -25,8 +25,11 @@
 ## Quick start
 
 ```bash
-# 1. Install
-go install github.com/cloudapp3/vminfo/cmd/vminfo@latest
+# 1. Install — one-line script (Linux/macOS)
+curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash
+
+# Or with sudo to install to /usr/local/bin
+curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | sudo bash
 
 # 2. Run — interactive TUI
 vminfo
@@ -37,26 +40,16 @@ vminfo summary --json
 
 That's it. No config files, no daemons, no setup.
 
-## Install from GitHub Release
+The install script auto-selects a directory: `/usr/local/bin` → `~/.local/bin` → `~/bin`.
 
-### One-line install (Linux/macOS)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash
-```
-
-By default, the script installs `vminfo` into `~/.local/bin`.
-
-### Install a specific version
+Other install options:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash -s -- --version v0.1.0
-```
+# Custom directory
+curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash -s -- --dir /opt/bin
 
-### Install to a custom directory
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash -s -- --dir /usr/local/bin
+# Go source build
+go install github.com/cloudapp3/vminfo/cmd/vminfo@latest
 ```
 
 ## What it does
@@ -98,7 +91,6 @@ vminfo kill <pid>      # SIGTERM a process (Linux)
 vminfo update          # check + install the latest tagged release
 vminfo update --check  # check without installing
 vminfo update --version v0.1.0
-vminfo version --json  # build metadata
 vminfo --lang zh       # switch UI language
 ```
 
@@ -137,15 +129,6 @@ vminfo update
 vminfo update --check
 vminfo update --version v0.1.0
 ```
-
-Notes:
-
-- Uses the repository configured in build metadata (default: `cloudapp3/vminfo`)
-- Respects `GITHUB_TOKEN` / `GH_TOKEN` for higher GitHub API limits
-- Update checks are cached at `$XDG_CACHE_HOME/vminfo/update-check.json` or `~/.cache/vminfo/update-check.json`
-- `vminfo update` installs the selected release in place; `vminfo update --check` only reports status
-- Development builds (`version=dev`) should use `--version vX.Y.Z` to install a tagged release
-- Windows currently supports `update --check`; in-place self-update is not supported yet
 
 Recent web UI polish:
 
@@ -236,6 +219,7 @@ go run ./cmd/vminfo summary --json
 
 ## Documentation
 
+- [docs/README.zh-CN.md](docs/README.zh-CN.md)
 - [docs/CHANGELOG.md](docs/CHANGELOG.md)
 
 ## License

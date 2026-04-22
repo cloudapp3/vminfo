@@ -39,7 +39,7 @@ jobs:
 
       - name: Smoke checks
         run: |
-          go run ./cmd/vminfo version --json
+          go run ./cmd/vminfo version
           go run ./cmd/vminfo summary --json
           go run ./cmd/vminfo watch --count 1
           go run ./cmd/vminfo ps

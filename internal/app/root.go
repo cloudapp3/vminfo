@@ -22,6 +22,7 @@ import (
 	"github.com/cloudapp3/vminfo/internal/collector"
 	"github.com/cloudapp3/vminfo/internal/i18n"
 	"github.com/cloudapp3/vminfo/internal/tui"
+	"github.com/cloudapp3/vminfo/internal/updater"
 	"github.com/cloudapp3/vminfo/internal/web"
 )
 
@@ -37,13 +38,14 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	stdout = defaultWriter(stdout)
 	stderr = defaultWriter(stderr)
 
-	// Pre-scan global flags (--lang, --web, --port, --bind, --tui, --interval, --silent)
+	// Pre-scan global flags (--lang, --web, --port, --bind, --tui, --interval, --silent, --no-update-check)
 	langFlag := ""
 	webMode := false
 	webPort := 20021
 	webBind := "127.0.0.1"
 	tuiMode := false
 	silent := false
+	noUpdateCheck := os.Getenv("VMINFO_NO_UPDATE_CHECK") != ""
 	webInterval := 3 * time.Second
 	filtered := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
@@ -82,6 +84,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 				webInterval = d
 			}
 			i++
+		case args[i] == "--no-update-check":
+			noUpdateCheck = true
 		default:
 			filtered = append(filtered, args[i])
 		}
@@ -94,6 +98,27 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		locale = strings.ToLower(strings.TrimSpace(langFlag))
 	}
 	tr := i18n.New(locale)
+
+	// Background update check (non-blocking)
+	if !noUpdateCheck && !silent && vminfo.Version != "dev" {
+		go func() {
+			cfg := updater.Config{
+				Repo:        "cloudapp3/vminfo",
+				CurrentVer:  vminfo.Version,
+				GitHubToken: updateTokenFromEnv(),
+			}
+			u := updater.New(cfg)
+			result, err := u.CheckForUpdate(context.Background())
+			if err != nil {
+				return
+			}
+			if result != nil && result.UpdateAvailable {
+				msg := fmt.Sprintf(tr.T("A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.")+"\n",
+					formatReleaseTag(result.LatestVersion), formatReleaseTag(result.CurrentVersion))
+				_, _ = fmt.Fprint(stderr, msg)
+			}
+		}()
+	}
 
 	// Handle web mode
 	if webMode {
@@ -113,7 +138,22 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 	switch cmd {
 	case "version", "--version":
-		return runVersion(stdout, stderr, args[1:], tr)
+		meta := vminfo.Metadata()
+		lines := []string{fmt.Sprintf("%s %s", meta.Name, meta.Version)}
+		if meta.Commit != "" {
+			lines = append(lines, fmt.Sprintf(tr.T("commit:")+" %s", meta.Commit))
+		}
+		if meta.BuildTime != "" {
+			lines = append(lines, fmt.Sprintf(tr.T("built:")+"  %s", meta.BuildTime))
+		}
+		if meta.Channel != "" {
+			lines = append(lines, fmt.Sprintf(tr.T("channel:")+" %s", meta.Channel))
+		}
+		if meta.SchemaVersion != "" {
+			lines = append(lines, fmt.Sprintf(tr.T("schema:")+" %s", meta.SchemaVersion))
+		}
+		_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
+		return err
 	case "info":
 		return runInfo(ctx, stdout, tr)
 	case "summary":
@@ -474,47 +514,6 @@ func runKill(ctx context.Context, stdout io.Writer, args []string, tr *i18n.Tran
 	return err
 }
 
-func runVersion(stdout, stderr io.Writer, args []string, tr *i18n.Translator) error {
-	fs := flag.NewFlagSet("version", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	var asJSON bool
-	fs.BoolVar(&asJSON, "json", false, tr.T("write version metadata as JSON"))
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return nil
-		}
-		return err
-	}
-	if len(fs.Args()) != 0 {
-		return fmt.Errorf("%w: version does not accept positional args", ErrUsage)
-	}
-
-	meta := vminfo.Metadata()
-	if asJSON {
-		encoder := json.NewEncoder(stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(meta)
-	}
-
-	lines := []string{
-		fmt.Sprintf("%s %s", meta.Name, meta.Version),
-	}
-	if meta.Commit != "" {
-		lines = append(lines, fmt.Sprintf(tr.T("commit:")+" %s", meta.Commit))
-	}
-	if meta.BuildTime != "" {
-		lines = append(lines, fmt.Sprintf(tr.T("built:")+"  %s", meta.BuildTime))
-	}
-	if meta.Channel != "" {
-		lines = append(lines, fmt.Sprintf(tr.T("channel:")+" %s", meta.Channel))
-	}
-	if meta.SchemaVersion != "" {
-		lines = append(lines, fmt.Sprintf(tr.T("schema:")+" %s", meta.SchemaVersion))
-	}
-	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
-	return err
-}
-
 func writeSummary(w io.Writer, staticInfo vminfo.StaticInfo, stats vminfo.RuntimeStats, tr *i18n.Translator) error {
 	lines := []string{
 		tr.T("Host Summary"),
@@ -634,7 +633,6 @@ func helpText(tr *i18n.Translator) string {
 		"  vminfo --web --tui     " + tr.T("start web + TUI"),
 		"  vminfo --web --port N  " + tr.T("web dashboard on port N (default 20021)"),
 		"  vminfo version         " + tr.T("show app version"),
-		"  vminfo version --json  " + tr.T("show app metadata as JSON"),
 		"  vminfo summary         " + tr.T("collect one snapshot"),
 		"  vminfo summary --json  " + tr.T("collect one snapshot as JSON"),
 		"  vminfo watch           " + tr.T("stream runtime snapshots"),
@@ -655,6 +653,7 @@ func helpText(tr *i18n.Translator) string {
 		"  --tui                  " + tr.T("start TUI alongside --web"),
 		"  --silent, -s           " + tr.T("suppress informational output"),
 		"  --interval <duration>  " + tr.T("refresh interval (default 3s)"),
+		"  --no-update-check      " + tr.T("skip background update check"),
 		"",
 		tr.T("Status:"),
 		"  " + tr.T("TUI, web, summary, watch, ps, kill, update, and version are implemented."),

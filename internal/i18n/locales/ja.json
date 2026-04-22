@@ -122,7 +122,6 @@
   "send SIGTERM on Linux": "SIGTERM 送信 (Linux)",
   "show help": "ヘルプ表示",
   "Status:": "状態:",
-  "TUI, summary, watch, ps, kill, and version are implemented.": "TUI、summary、watch、ps、kill、version が実装済みです。",
   "write summary as JSON": "概要を JSON 出力",
   "sampling interval": "サンプリング間隔",
   "write newline-delimited JSON snapshots": "スナップショットを JSON 行で出力",
@@ -151,5 +150,18 @@
   "commit:": "コミット:",
   "built:": "ビルド:",
   "channel:": "チャンネル:",
-  "schema:": "スキーマ:"
+  "schema:": "スキーマ:",
+  "check for updates without installing": "インストールせずにアップデートを確認",
+  "install or inspect a specific release tag": "特定のリリースタグをインストールまたは確認",
+  "already on requested version: %s": "要求されたバージョンは既に適用済み: %s",
+  "requested version %s is not newer than current %s": "要求されたバージョン %s は現在の %s より新しくありません",
+  "already up to date: %s": "既に最新です: %s",
+  "updating from %s to %s": "%s から %s にアップデート中",
+  "updated successfully to %s": "%s へのアップデートが完了しました",
+  "target release available: %s (current %s)": "対象リリースが利用可能: %s (現在 %s)",
+  "update available: %s (current %s)": "アップデートがあります: %s (現在 %s)",
+  "check for and install updates": "アップデートを確認してインストール",
+  "skip background update check": "バックグラウンドのアップデート確認をスキップ",
+  "TUI, web, summary, watch, ps, kill, update, and version are implemented.": "TUI、web、summary、watch、ps、kill、update、version が実装済みです。",
+  "A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.": "vminfo の新バージョンが利用可能です: %s (現在: %s)。'vminfo update' を実行してアップグレードしてください。"
 }

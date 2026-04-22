@@ -160,9 +160,6 @@ func (u *Updater) DownloadAndInstall(ctx context.Context, release *Release, prog
 	if err != nil {
 		return fmt.Errorf("extraction failed: %w", err)
 	}
-	if extractedPath == "" {
-		return fmt.Errorf("binary not found in archive")
-	}
 
 	// Get current binary path
 	selfPath, err := SelfPath()

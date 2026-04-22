@@ -122,7 +122,6 @@
   "send SIGTERM on Linux": "отправить SIGTERM (Linux)",
   "show help": "показать справку",
   "Status:": "Статус:",
-  "TUI, summary, watch, ps, kill, and version are implemented.": "TUI, summary, watch, ps, kill и version реализованы.",
   "write summary as JSON": "вывести сводку в JSON",
   "sampling interval": "интервал выборки",
   "write newline-delimited JSON snapshots": "снепшоты в JSON-строках",
@@ -151,5 +150,18 @@
   "commit:": "коммит:",
   "built:": "сборка:",
   "channel:": "канал:",
-  "schema:": "схема:"
+  "schema:": "схема:",
+  "check for updates without installing": "Проверить обновления без установки",
+  "install or inspect a specific release tag": "Установить или просмотреть определённый тег релиза",
+  "already on requested version: %s": "Уже на запрошенной версии: %s",
+  "requested version %s is not newer than current %s": "Запрошенная версия %s не новее текущей %s",
+  "already up to date: %s": "Уже последняя версия: %s",
+  "updating from %s to %s": "Обновление с %s до %s",
+  "updated successfully to %s": "Успешно обновлено до %s",
+  "target release available: %s (current %s)": "Целевой релиз доступен: %s (текущий %s)",
+  "update available: %s (current %s)": "Доступно обновление: %s (текущая %s)",
+  "check for and install updates": "Проверить и установить обновления",
+  "skip background update check": "Пропустить фоновую проверку обновлений",
+  "TUI, web, summary, watch, ps, kill, update, and version are implemented.": "TUI, web, summary, watch, ps, kill, update и version реализованы.",
+  "A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.": "Доступна новая версия vminfo: %s (текущая: %s). Выполните 'vminfo update' для обновления."
 }

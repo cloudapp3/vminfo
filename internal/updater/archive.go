@@ -3,6 +3,7 @@ package updater
 import (
 	"archive/tar"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -54,5 +55,5 @@ func ExtractBinaryFromTarGz(archivePath, binaryName, destDir string) (string, er
 		return outPath, nil
 	}
 
-	return "", nil
+	return "", fmt.Errorf("binary %q not found in archive", binaryName)
 }

@@ -100,18 +100,18 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string) error 
 // fetchChecksums downloads and parses checksums.txt from the release assets,
 // returning a map[filename]hash.
 func (u *Updater) fetchChecksums(ctx context.Context, release *Release) (map[string]string, error) {
-	var checksumsURL string
+	// Verify checksums.txt exists in the release assets.
+	found := false
 	for _, asset := range release.Assets {
 		if asset.Name == "checksums.txt" {
-			checksumsURL = asset.URL
+			found = true
 			break
 		}
 	}
-	if checksumsURL == "" {
+	if !found {
 		return nil, fmt.Errorf("checksums.txt not found in release assets")
 	}
 
-	// Download checksums via browser_download_url pattern
 	downloadURL := fmt.Sprintf(
 		"https://github.com/%s/releases/download/%s/checksums.txt",
 		u.cfg.Repo, release.TagName,

@@ -8,9 +8,9 @@
 
 English: [../README.md](../README.md)
 
-## 演示
+## 预览
 
-![vminfo demo](assets/tui-demo.gif)
+![vminfo preview](assets/tui-demo.gif)
 
 > 截图会随终端宽度、字体与主题略有差异。
 
@@ -25,8 +25,11 @@ English: [../README.md](../README.md)
 ## 快速开始
 
 ```bash
-# 1. 安装
-go install github.com/cloudapp3/vminfo/cmd/vminfo@latest
+# 1. 一键安装（Linux/macOS）
+curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash
+
+# 或者加 sudo 装到 /usr/local/bin
+curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | sudo bash
 
 # 2. 运行 — 交互式 TUI
 vminfo
@@ -37,31 +40,21 @@ vminfo summary --json
 
 无需配置文件，无需守护进程，装完即用。
 
-## 从 GitHub Release 安装
+脚本按以下顺序自动选择安装目录：`/usr/local/bin` → `~/.local/bin` → `~/bin`。
 
-### 一键安装（Linux/macOS）
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash
-```
-
-默认会把 `vminfo` 安装到 `~/.local/bin`。
-
-### 安装指定版本
+其他安装方式：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash -s -- --version v0.1.0
-```
+# 安装到指定目录
+curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash -s -- --dir /opt/bin
 
-### 安装到指定目录
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash -s -- --dir /usr/local/bin
+# 从源码安装
+go install github.com/cloudapp3/vminfo/cmd/vminfo@latest
 ```
 
 ## 它能做什么
 
-vminfo 让你对任意主机一目了然：
+vminfo 是一个实时的机器监控可视化监控面板。
 
 - **TUI** — 全屏、实时刷新的终端仪表盘，支持概览和进程视图
 - **JSON** — 面向脚本、CI、监控流水线的机器可读输出
@@ -98,7 +91,6 @@ vminfo kill <pid>      # 向进程发送 SIGTERM（Linux）
 vminfo update          # 检查并安装最新 tag 版本
 vminfo update --check  # 只检查，不安装
 vminfo update --version v0.1.0
-vminfo version --json  # 构建元数据
 vminfo --lang zh       # 切换 UI 语言
 ```
 
@@ -137,15 +129,6 @@ vminfo update
 vminfo update --check
 vminfo update --version v0.1.0
 ```
-
-说明：
-
-- 默认读取构建元数据中的仓库地址（默认：`cloudapp3/vminfo`）
-- 支持 `GITHUB_TOKEN` / `GH_TOKEN`，可提升 GitHub API 限额
-- 更新检查缓存位于 `$XDG_CACHE_HOME/vminfo/update-check.json` 或 `~/.cache/vminfo/update-check.json`
-- `vminfo update` 会原地安装目标 release；`vminfo update --check` 只输出检查结果
-- 开发构建（`version=dev`）建议配合 `--version vX.Y.Z` 安装指定 tag
-- Windows 当前仅支持 `update --check`，暂不支持原地自更新
 
 近期 Web UI 微调：
 

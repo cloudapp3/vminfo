@@ -32,15 +32,6 @@ func compareVersions(a, b string) int {
 	return 0
 }
 
-// normalizeVersionTag ensures the version string has a "v" prefix.
-func normalizeVersionTag(v string) string {
-	v = strings.TrimSpace(v)
-	if v != "" && !strings.HasPrefix(v, "v") {
-		return "v" + v
-	}
-	return v
-}
-
 // stripVersionPrefix removes the leading "v" from a version string.
 func stripVersionPrefix(v string) string {
 	return strings.TrimPrefix(v, "v")

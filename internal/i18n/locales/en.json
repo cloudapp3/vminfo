@@ -1,4 +1,17 @@
 {
   "Procs": "Procs",
-  "idle interfaces": "idle interfaces"
+  "idle interfaces": "idle interfaces",
+  "check for updates without installing": "check for updates without installing",
+  "install or inspect a specific release tag": "install or inspect a specific release tag",
+  "already on requested version: %s": "already on requested version: %s",
+  "requested version %s is not newer than current %s": "requested version %s is not newer than current %s",
+  "already up to date: %s": "already up to date: %s",
+  "updating from %s to %s": "updating from %s to %s",
+  "updated successfully to %s": "updated successfully to %s",
+  "target release available: %s (current %s)": "target release available: %s (current %s)",
+  "update available: %s (current %s)": "update available: %s (current %s)",
+  "check for and install updates": "check for and install updates",
+  "skip background update check": "skip background update check",
+  "TUI, web, summary, watch, ps, kill, update, and version are implemented.": "TUI, web, summary, watch, ps, kill, update, and version are implemented.",
+  "A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.": "A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade."
 }

@@ -4,6 +4,7 @@ package updater
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -29,7 +30,6 @@ func AtomicReplace(newBinary, currentBinary string) error {
 	dir := filepath.Dir(currentBinary)
 	tmp := filepath.Join(dir, ".vminfo-update-tmp")
 
-	// Copy new binary to temp file in same directory
 	src, err := os.Open(newBinary)
 	if err != nil {
 		return fmt.Errorf("cannot open new binary: %w", err)
@@ -42,7 +42,7 @@ func AtomicReplace(newBinary, currentBinary string) error {
 	}
 	defer dst.Close()
 
-	if _, err := copyFile(dst, src); err != nil {
+	if _, err := io.Copy(dst, src); err != nil {
 		os.Remove(tmp)
 		return fmt.Errorf("cannot copy binary: %w", err)
 	}
@@ -59,34 +59,4 @@ func AtomicReplace(newBinary, currentBinary string) error {
 	}
 
 	return nil
-}
-
-func copyFile(dst, src *os.File) (int64, error) {
-	info, err := src.Stat()
-	if err != nil {
-		return 0, err
-	}
-	return copyFileN(dst, src, info.Size())
-}
-
-func copyFileN(dst, src *os.File, size int64) (int64, error) {
-	buf := make([]byte, 32*1024)
-	var written int64
-	for written < size {
-		n, err := src.Read(buf)
-		if n > 0 {
-			_, werr := dst.Write(buf[:n])
-			if werr != nil {
-				return written, werr
-			}
-			written += int64(n)
-		}
-		if err != nil {
-			if err.Error() == "EOF" {
-				break
-			}
-			return written, err
-		}
-	}
-	return written, nil
 }

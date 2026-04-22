@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO="cloudapp3/vminfo"
 BINARY_NAME="vminfo"
-INSTALL_DIR="${VMINFO_INSTALL_DIR:-$HOME/.local/bin}"
+INSTALL_DIR="${VMINFO_INSTALL_DIR:-}"
 VERSION=""
 SKIP_VERIFY=0
 
@@ -16,14 +16,15 @@ Usage:
 
 Options:
   --version <tag>   Install a specific release tag. Defaults to the latest release.
-  --dir <path>      Install directory. Defaults to ~/.local/bin
+  --dir <path>      Install directory. Auto-detected in order: /usr/local/bin,
+                    ~/.local/bin, ~/bin. Override with VMINFO_INSTALL_DIR env var.
   --skip-verify     Skip SHA-256 checksum verification.
   -h, --help        Show this help message.
 
 Examples:
   curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | sudo bash
   curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash -s -- --version v0.1.0
-  curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash -s -- --dir /usr/local/bin
 EOF
 }
 
@@ -76,6 +77,17 @@ require_cmd curl
 require_cmd tar
 require_cmd uname
 require_cmd mktemp
+
+# Auto-detect install directory if not explicitly set
+if [ -z "$INSTALL_DIR" ]; then
+  for d in /usr/local/bin "$HOME/.local/bin" "$HOME/bin"; do
+    if [ -w "$d" ] 2>/dev/null || [ -w "$(dirname "$d")" ] 2>/dev/null; then
+      INSTALL_DIR="$d"
+      break
+    fi
+  done
+  INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
+fi
 
 case "$(uname -s)" in
   Linux) OS="linux" ;;
@@ -189,10 +201,6 @@ else
 fi
 
 log "Installed ${BINARY_NAME} ${VERSION} to ${TARGET_PATH}"
-if [[ ":$PATH:" != *":${INSTALL_DIR}:"* ]]; then
-  log "Add this directory to your PATH if needed:"
-  log "  export PATH=\"${INSTALL_DIR}:\$PATH\""
-fi
 
 log "Verify the installation with:"
-log "  ${TARGET_PATH} version --json"
+log "  ${TARGET_PATH} version"
