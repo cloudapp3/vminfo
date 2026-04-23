@@ -15,6 +15,7 @@ Thanks for helping improve vminfo. Bug reports, feature ideas, documentation imp
 ## Before you start
 
 - Prefer opening an issue first for bugs, feature requests, or non-trivial changes
+- For small documentation fixes, feel free to open a PR directly
 - Keep changes small and focused
 - Avoid adding new dependencies unless there is a strong reason and prior discussion
 - Do not revert unrelated user changes in the working tree
