@@ -1,6 +1,6 @@
-# vminfo
+# vminfo — 终端系统监控工具、Web 仪表盘与 Go 库
 
-> 一条命令看清机器上的一切 — CPU、内存、磁盘、网络、进程 — 终端 UI、JSON 或浏览器仪表盘，随你选。
+> 面向 Linux、macOS 和 Windows 的跨平台系统监控工具。用终端 UI、JSON 输出或浏览器仪表盘，快速查看 CPU、内存、磁盘、网络、负载与进程。
 
 [![CI](https://github.com/cloudapp3/vminfo/actions/workflows/ci.yml/badge.svg)](https://github.com/cloudapp3/vminfo/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/cloudapp3/vminfo.svg)](https://pkg.go.dev/github.com/cloudapp3/vminfo)
@@ -8,19 +8,7 @@
 
 English: [../README.md](../README.md)
 
-## 预览
-
-![vminfo preview](assets/tui-demo.gif)
-
-> 截图会随终端宽度、字体与主题略有差异。
-
-| TUI 概览 | Web 仪表盘 |
-| --- | --- |
-| ![vminfo overview refreshed](assets/tui-overview-refreshed.png) | ![vminfo web dashboard](assets/web-dashboard.png) |
-
-| 进程 | 帮助 |
-| --- | --- |
-| ![vminfo processes](assets/tui-processes.png) | ![vminfo help](assets/tui-help.png) |
+[快速开始](#快速开始) · [预览](#预览) · [加入 Telegram 群组](https://t.me/VMPulse) · [提交 Issue](https://github.com/cloudapp3/vminfo/issues/new) · [参与贡献](#参与贡献)
 
 ## 快速开始
 
@@ -52,9 +40,37 @@ curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | 
 go install github.com/cloudapp3/vminfo/cmd/vminfo@latest
 ```
 
+如果你在使用过程中遇到问题、想提需求，或者希望交流想法，欢迎加入 [VMPulse Telegram 群组](https://t.me/VMPulse) 或直接 [提交 Issue](https://github.com/cloudapp3/vminfo/issues/new)。
+
+## 适合谁 / 适用场景
+
+vminfo 适合开发者、SRE、DevOps 工程师和服务器运维人员，用最低的接入成本快速查看主机实时指标。
+
+适合这些场景：
+
+- 在终端中实时查看 CPU、内存、磁盘、网络和负载
+- 快速排查 Linux 进程占用情况
+- 输出 JSON 供脚本、CI 或自动化流程消费
+- 用 `vminfo --web` 打开轻量级浏览器监控面板
+- 在自己的 Go 工具里嵌入主机指标采集能力
+
+## 预览
+
+![vminfo preview](assets/tui-demo.gif)
+
+> 截图会随终端宽度、字体与主题略有差异。
+
+| TUI 概览 | Web 仪表盘 |
+| --- | --- |
+| ![vminfo overview refreshed](assets/tui-overview-refreshed.png) | ![vminfo web dashboard](assets/web-dashboard.png) |
+
+| 进程 | 帮助 |
+| --- | --- |
+| ![vminfo processes](assets/tui-processes.png) | ![vminfo help](assets/tui-help.png) |
+
 ## 它能做什么
 
-vminfo 是一个实时的机器监控可视化监控面板。
+vminfo 是一个跨平台系统监控工具，帮助你快速看清机器当前状态：
 
 - **TUI** — 全屏、实时刷新的终端仪表盘，支持概览和进程视图
 - **JSON** — 面向脚本、CI、监控流水线的机器可读输出
@@ -120,7 +136,7 @@ Web 模式下普通浏览访问保持安静：默认不再输出 HTTP 访问日�
 - `GET /api/v1/snapshot` — 当前快照 JSON
 - `GET /ws` — 实时 WebSocket 流
 
-## 自更新
+## 更新命令
 
 Release 构建可直接从 GitHub Releases 自更新：
 
@@ -157,7 +173,7 @@ vminfo update --version v0.1.0
 
 状态徽标：`LIVE` · `PAUSED` · `LOADING` · `ERROR` · `STALE`
 
-## 库用法
+## 支持作为库 import 使用
 
 ```go
 package main
@@ -195,6 +211,29 @@ func main() {
 
 TUI 需要真实 TTY。`ps` 和 `kill` 按设计仅 Linux 可用。
 
+## 社区与支持
+
+- 💬 加入 Telegram 群组：[t.me/VMPulse](https://t.me/VMPulse)
+- 🐛 发现 bug 或想提新功能？[提交 Issue](https://github.com/cloudapp3/vminfo/issues/new)
+- 📚 想先看说明文档？见 [文档](#文档)
+- 🤝 想参与项目？从 [CONTRIBUTING.md](../CONTRIBUTING.md) 开始
+
+你的反馈、问题报告和需求建议都会直接帮助 vminfo 的后续路线。
+
+## 参与贡献
+
+欢迎各种形式的贡献：bug 报告、功能建议、文档优化、测试补充、平台兼容修复，以及 Pull Request。
+
+如果你想参与：
+
+1. 先通过 [Issue](https://github.com/cloudapp3/vminfo/issues/new) 讨论 bug、功能或非平凡改动
+2. 阅读 [CONTRIBUTING.md](../CONTRIBUTING.md)
+3. Fork 仓库并提交聚焦改动
+4. 运行 `go test ./...` 和 `go vet ./...`
+5. 提交 Pull Request
+
+如果你还不确定从哪里开始，也欢迎先加入 [Telegram](https://t.me/VMPulse) 交流。
+
 ## 从源码构建
 
 ```bash
@@ -220,6 +259,7 @@ go run ./cmd/vminfo summary --json
 ## 文档
 
 - [../README.md](../README.md)
+- [../CONTRIBUTING.md](../CONTRIBUTING.md)
 - [CHANGELOG.md](CHANGELOG.md)
 
 ## License

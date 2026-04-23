@@ -1,6 +1,6 @@
-# vminfo
+# vminfo — terminal system monitor, web dashboard, and Go library
 
-> One command to see everything running on your machine — CPU, memory, disk, network, processes — in a polished terminal UI, JSON, or browser dashboard.
+> Cross-platform system monitoring for Linux, macOS, and Windows. Inspect CPU, memory, disk, network, load, and processes in a polished terminal UI, JSON output, or browser dashboard.
 
 [![CI](https://github.com/cloudapp3/vminfo/actions/workflows/ci.yml/badge.svg)](https://github.com/cloudapp3/vminfo/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/cloudapp3/vminfo.svg)](https://pkg.go.dev/github.com/cloudapp3/vminfo)
@@ -8,19 +8,7 @@
 
 中文说明：[docs/README.zh-CN.md](docs/README.zh-CN.md)
 
-## Preview
-
-![vminfo preview](docs/assets/tui-demo.gif)
-
-> Screens may vary slightly by terminal width, font, and theme.
-
-| TUI overview | Web dashboard |
-| --- | --- |
-| ![vminfo overview refreshed](docs/assets/tui-overview-refreshed.png) | ![vminfo web dashboard](docs/assets/web-dashboard.png) |
-
-| Processes | Help |
-| --- | --- |
-| ![vminfo processes](docs/assets/tui-processes.png) | ![vminfo help](docs/assets/tui-help.png) |
+[Quick start](#quick-start) · [Preview](#preview) · [Join Telegram](https://t.me/VMPulse) · [Open an issue](https://github.com/cloudapp3/vminfo/issues/new) · [Contributing](#contributing)
 
 ## Quick start
 
@@ -51,6 +39,34 @@ curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | 
 # Go source build
 go install github.com/cloudapp3/vminfo/cmd/vminfo@latest
 ```
+
+Need help, want to share feedback, or request a feature? Join the [VMPulse Telegram group](https://t.me/VMPulse) or [open an issue](https://github.com/cloudapp3/vminfo/issues/new).
+
+## Why vminfo
+
+vminfo is built for developers, SREs, DevOps engineers, and server operators who want fast, low-friction visibility into host metrics.
+
+Use vminfo when you need to:
+
+- monitor CPU, memory, disk, network, and load from the terminal
+- inspect Linux processes quickly without switching tools
+- export machine-readable JSON for scripts, CI, or automation
+- open a lightweight browser dashboard on a server with `vminfo --web`
+- embed host metrics collection into your own Go tools
+
+## Preview
+
+![vminfo preview](docs/assets/tui-demo.gif)
+
+> Screens may vary slightly by terminal width, font, and theme.
+
+| TUI overview | Web dashboard |
+| --- | --- |
+| ![vminfo overview refreshed](docs/assets/tui-overview-refreshed.png) | ![vminfo web dashboard](docs/assets/web-dashboard.png) |
+
+| Processes | Help |
+| --- | --- |
+| ![vminfo processes](docs/assets/tui-processes.png) | ![vminfo help](docs/assets/tui-help.png) |
 
 ## What it does
 
@@ -195,6 +211,29 @@ Exported types: `StaticInfo` · `RuntimeStats` · `ProcessInfo` · `Snapshot` ·
 
 TUI requires a real TTY. `ps` and `kill` are Linux-only by design.
 
+## Community & Support
+
+- 💬 Join the Telegram group: [t.me/VMPulse](https://t.me/VMPulse)
+- 🐛 Found a bug or want a feature? [Open an issue](https://github.com/cloudapp3/vminfo/issues/new)
+- 📚 Prefer to start with docs? See [Documentation](#documentation)
+- 🤝 Want to contribute? Start with [CONTRIBUTING.md](CONTRIBUTING.md)
+
+Feedback, bug reports, and feature requests directly help shape the vminfo roadmap.
+
+## Contributing
+
+Contributions are welcome — bug reports, feature ideas, documentation improvements, tests, platform compatibility fixes, and pull requests.
+
+If you want to help:
+
+1. [Open an issue](https://github.com/cloudapp3/vminfo/issues/new) to discuss a bug, feature, or non-trivial change
+2. Read [CONTRIBUTING.md](CONTRIBUTING.md)
+3. Fork the repository and make a focused change
+4. Run `go test ./...` and `go vet ./...`
+5. Open a pull request
+
+Questions before opening a PR? Join [Telegram](https://t.me/VMPulse) and say hi.
+
 ## Build from source
 
 ```bash
@@ -220,6 +259,7 @@ go run ./cmd/vminfo summary --json
 ## Documentation
 
 - [docs/README.zh-CN.md](docs/README.zh-CN.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
 - [docs/CHANGELOG.md](docs/CHANGELOG.md)
 
 ## License
