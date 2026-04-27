@@ -1,7 +1,10 @@
 package app
 
 import (
+	"cmp"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -9,9 +12,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -38,11 +42,12 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	stdout = defaultWriter(stdout)
 	stderr = defaultWriter(stderr)
 
-	// Pre-scan global flags (--lang, --web, --port, --bind, --tui, --interval, --silent, --no-update-check)
+	// Pre-scan global flags (--lang, --web, --port, --bind, --token, --tui, --interval, --silent, --no-update-check)
 	langFlag := ""
 	webMode := false
 	webPort := 20021
 	webBind := "127.0.0.1"
+	webTokenFlag := ""
 	tuiMode := false
 	silent := false
 	noUpdateCheck := os.Getenv("VMINFO_NO_UPDATE_CHECK") != ""
@@ -71,6 +76,16 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		case args[i] == "--bind" && i+1 < len(args):
 			webBind = args[i+1]
 			i++
+		case strings.HasPrefix(args[i], "--token="):
+			webTokenFlag = strings.TrimPrefix(args[i], "--token=")
+		case args[i] == "--token":
+			// --token without a value means auto-generate
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				webTokenFlag = args[i+1]
+				i++
+			} else {
+				webTokenFlag = "" // bare --token, will auto-generate via resolveWebToken
+			}
 		case args[i] == "--tui":
 			tuiMode = true
 		case args[i] == "--silent", args[i] == "-s":
@@ -123,7 +138,11 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Handle web mode
 	if webMode {
 		addr := fmt.Sprintf("%s:%d", webBind, webPort)
-		return runWeb(ctx, stdout, stderr, tr, addr, webInterval, tuiMode, silent)
+		webToken, webTokenGenerated, err := resolveWebToken(webTokenFlag, webTokenFlag == "")
+		if err != nil {
+			return err
+		}
+		return runWeb(ctx, stdout, stderr, tr, addr, webInterval, tuiMode, silent, webToken, webTokenGenerated)
 	}
 
 	if len(args) == 0 {
@@ -173,7 +192,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 }
 
-func runWeb(ctx context.Context, stdout, stderr io.Writer, tr *i18n.Translator, addr string, interval time.Duration, withTUI bool, silent bool) error {
+func runWeb(ctx context.Context, stdout, stderr io.Writer, tr *i18n.Translator, addr string, interval time.Duration, withTUI bool, silent bool, authToken string, tokenGenerated bool) error {
 	col := collector.New(interval)
 	go col.Start(ctx)
 	defer col.Stop()
@@ -183,7 +202,7 @@ func runWeb(ctx context.Context, stdout, stderr io.Writer, tr *i18n.Translator, 
 	snap := waitForCollectorSnapshot(ctx, col, 2*time.Second)
 
 	// Start web server
-	srv := web.NewServer(addr, col)
+	srv := web.NewServer(addr, col, web.Options{AuthToken: authToken})
 	go func() {
 		if err := srv.Start(); err != nil {
 			if errors.Is(err, http.ErrServerClosed) {
@@ -193,8 +212,8 @@ func runWeb(ctx context.Context, stdout, stderr io.Writer, tr *i18n.Translator, 
 		}
 	}()
 
-	if !silent {
-		for _, line := range webDashboardListenLines(addr, snap) {
+	if !silent || tokenGenerated {
+		for _, line := range webDashboardListenLines(addr, snap, authToken) {
 			fmt.Fprintln(stdout, line)
 		}
 	}
@@ -244,17 +263,17 @@ func waitForCollectorSnapshot(ctx context.Context, col *collector.Collector, tim
 	return col.Latest()
 }
 
-func webDashboardListenLines(addr string, snap *collector.Snapshot) []string {
+func webDashboardListenLines(addr string, snap *collector.Snapshot, authToken string) []string {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
-		return []string{fmt.Sprintf("Web dashboard: http://%s", addr)}
+		return []string{fmt.Sprintf("Web dashboard: %s", webDashboardURL(addr, authToken))}
 	}
 	if !isWildcardBind(host) {
-		return []string{fmt.Sprintf("Web dashboard: http://%s", net.JoinHostPort(host, port))}
+		return []string{fmt.Sprintf("Web dashboard: %s", webDashboardURL(net.JoinHostPort(host, port), authToken))}
 	}
 
 	lines := []string{"Web dashboard:"}
-	lines = append(lines, fmt.Sprintf("  %-6s %s", "Local", "http://"+net.JoinHostPort("127.0.0.1", port)))
+	lines = append(lines, fmt.Sprintf("  %-6s %s", "Local", webDashboardURL(net.JoinHostPort("127.0.0.1", port), authToken)))
 
 	if snap == nil {
 		return lines
@@ -262,15 +281,30 @@ func webDashboardListenLines(addr string, snap *collector.Snapshot) []string {
 
 	publicIP := bestInterfaceIPv4(snap.Network.Interfaces, true)
 	if publicIP != "" {
-		lines = append(lines, fmt.Sprintf("  %-6s %s", "Public", "http://"+net.JoinHostPort(publicIP, port)))
+		lines = append(lines, fmt.Sprintf("  %-6s %s", "Public", webDashboardURL(net.JoinHostPort(publicIP, port), authToken)))
 	}
 
 	lanIP := bestInterfaceIPv4(snap.Network.Interfaces, false)
 	if lanIP != "" && lanIP != publicIP {
-		lines = append(lines, fmt.Sprintf("  %-6s %s", "LAN", "http://"+net.JoinHostPort(lanIP, port)))
+		lines = append(lines, fmt.Sprintf("  %-6s %s", "LAN", webDashboardURL(net.JoinHostPort(lanIP, port), authToken)))
 	}
 
 	return lines
+}
+
+func webDashboardURL(hostport, authToken string) string {
+	if strings.TrimSpace(authToken) == "" {
+		return "http://" + hostport
+	}
+	u := &url.URL{
+		Scheme: "http",
+		Host:   hostport,
+		Path:   "/",
+	}
+	query := u.Query()
+	query.Set("token", authToken)
+	u.RawQuery = query.Encode()
+	return u.String()
 }
 
 func isWildcardBind(host string) bool {
@@ -280,6 +314,29 @@ func isWildcardBind(host string) bool {
 	default:
 		return false
 	}
+}
+
+func resolveWebToken(raw string, autoGenerate bool) (token string, generated bool, err error) {
+	value := strings.TrimSpace(raw)
+	if value != "" {
+		return value, false, nil
+	}
+	if autoGenerate {
+		token, err := generateWebToken()
+		if err != nil {
+			return "", false, fmt.Errorf("generate web token: %w", err)
+		}
+		return token, true, nil
+	}
+	return "", false, nil
+}
+
+func generateWebToken() (string, error) {
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 func bestInterfaceIPv4(ifaces []collector.NetInterface, wantPublic bool) string {
@@ -319,19 +376,21 @@ func bestInterfaceIPv4(ifaces []collector.NetInterface, wantPublic bool) string 
 		return ""
 	}
 
-	sort.SliceStable(items, func(i, j int) bool {
-		a, b := items[i], items[j]
+	slices.SortFunc(items, func(a, b candidate) int {
 		aActive := a.rx > 0 || a.tx > 0
 		bActive := b.rx > 0 || b.tx > 0
 		if aActive != bActive {
-			return aActive
+			if aActive {
+				return -1
+			}
+			return 1
 		}
 		aPri := ifaceDisplayPriority(a.name)
 		bPri := ifaceDisplayPriority(b.name)
 		if aPri != bPri {
-			return aPri < bPri
+			return cmp.Compare(aPri, bPri)
 		}
-		return a.name < b.name
+		return cmp.Compare(a.name, b.name)
 	})
 
 	return items[0].ip
@@ -597,30 +656,28 @@ func writeProcesses(w io.Writer, items []vminfo.ProcessInfo, tr *i18n.Translator
 
 func sortProcesses(items []vminfo.ProcessInfo, sortKey string) {
 	sortKey = strings.ToLower(strings.TrimSpace(sortKey))
-	sort.SliceStable(items, func(i, j int) bool {
-		left := items[i]
-		right := items[j]
+	slices.SortFunc(items, func(a, b vminfo.ProcessInfo) int {
 		switch sortKey {
 		case "mem":
-			if left.MemoryPercent != right.MemoryPercent {
-				return left.MemoryPercent > right.MemoryPercent
+			if a.MemoryPercent != b.MemoryPercent {
+				return cmp.Compare(b.MemoryPercent, a.MemoryPercent)
 			}
 		case "pid":
-			if left.PID != right.PID {
-				return left.PID < right.PID
+			if a.PID != b.PID {
+				return cmp.Compare(a.PID, b.PID)
 			}
 		case "name":
-			leftName := strings.ToLower(strings.TrimSpace(left.Name))
-			rightName := strings.ToLower(strings.TrimSpace(right.Name))
-			if leftName != rightName {
-				return leftName < rightName
+			aName := strings.ToLower(strings.TrimSpace(a.Name))
+			bName := strings.ToLower(strings.TrimSpace(b.Name))
+			if aName != bName {
+				return cmp.Compare(aName, bName)
 			}
 		default:
-			if left.CPUPercent != right.CPUPercent {
-				return left.CPUPercent > right.CPUPercent
+			if a.CPUPercent != b.CPUPercent {
+				return cmp.Compare(b.CPUPercent, a.CPUPercent)
 			}
 		}
-		return left.PID < right.PID
+		return cmp.Compare(a.PID, b.PID)
 	})
 }
 
@@ -650,6 +707,7 @@ func helpText(tr *i18n.Translator) string {
 		"  --web                  " + tr.T("enable web dashboard"),
 		"  --port <N>             " + tr.T("web dashboard port (default 20021)"),
 		"  --bind <addr>          " + tr.T("bind address (default 127.0.0.1, use 0.0.0.0 for all)"),
+		"  --token [value]        " + tr.T("protect --web with a token; bare --token generates one"),
 		"  --tui                  " + tr.T("start TUI alongside --web"),
 		"  --silent, -s           " + tr.T("suppress informational output"),
 		"  --interval <duration>  " + tr.T("refresh interval (default 3s)"),

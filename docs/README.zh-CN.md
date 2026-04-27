@@ -98,6 +98,8 @@ vminfo watch           # 持续输出快照
 vminfo watch --json    # 持续输出 JSON Lines
 vminfo watch --count 1 # 输出一条样本后退出
 vminfo --web           # 在 127.0.0.1:20021 启动 Web 仪表盘
+vminfo --web --token   # 自动生成仪表盘 token
+vminfo --web --token secret-token
 vminfo --web --tui     # Web + TUI 同时运行
 vminfo --web --bind 0.0.0.0 --port 8080
 vminfo ps              # Linux-only 进程列表
@@ -116,8 +118,17 @@ vminfo --lang zh       # 切换 UI 语言
 
 ```bash
 vminfo --web                      # 默认：127.0.0.1:20021
+vminfo --web --token             # 自动生成 token，并打印可直接打开的 URL
+vminfo --web --token my-token    # 使用固定 token
 vminfo --web --bind 0.0.0.0 --port 8080 --interval 1s
 ```
+
+如果你希望浏览器访问 Web 仪表盘时带鉴权，可以加上 `--token`：
+
+- `--token some-value`：使用你指定的固定 token
+- 裸写 `--token`：自动生成一个 URL-safe token
+- 第一次成功访问 `/?token=...` 后会写入 cookie，后续页面 / API / WebSocket 请求不必一直把 token 留在地址栏里
+- `GET /healthz` 仍保持公开，方便本地探针或健康检查继续使用
 
 当使用 `0.0.0.0` 绑定全部网卡时，启动输出会显示更友好的可访问地址，而不是只打印 `0.0.0.0`：
 
@@ -128,7 +139,19 @@ Web dashboard:
   LAN    http://192.168.1.23:20021   # 没有公网 IPv4 时回退到局域网地址
 ```
 
+开启 token 后，启动输出里的 URL 会自动带上 `?token=...`，可直接复制打开：
+
+```text
+Web dashboard: http://127.0.0.1:20021/?token=secret-token
+```
+
 Web 模式下普通浏览访问保持安静：默认不再输出 HTTP 访问日志和 WebSocket 连接/断开日志，只保留真正有用的启动信息和错误信息。
+
+开启 Web 鉴权后，浏览器访问规则也会更严格：
+
+- 仪表盘页面、JSON API 和 `/ws` 都需要 token 或已写入的 auth cookie
+- token 保护模式下不会再暴露宽松的 `Access-Control-Allow-Origin: *`
+- WebSocket 升级要求浏览器 `Origin` 与仪表盘 host 一致
 
 接口：
 

@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gorilla/websocket"
@@ -18,54 +19,44 @@ import (
 //go:embed static/*
 var staticFS embed.FS
 
+// Options configures the web dashboard server.
+type Options struct {
+	AuthToken string
+}
+
 // Server is the HTTP server for the web dashboard.
 type Server struct {
 	addr      string
 	collector *collector.Collector
 	hub       *WSHub
 	server    *http.Server
+	auth      *authConfig
 }
 
 // NewServer creates a new web server listening on addr (e.g. "127.0.0.1:20021").
-func NewServer(addr string, c *collector.Collector) *Server {
+func NewServer(addr string, c *collector.Collector, opts Options) *Server {
 	return &Server{
 		addr:      addr,
 		collector: c,
 		hub:       newHub(c),
+		auth:      newAuthConfig(opts.AuthToken),
 	}
 }
 
 // Start starts the HTTP server. Blocks until the server exits.
 func (s *Server) Start() error {
-	mux := http.NewServeMux()
-
-	// Static files (embedded SPA)
-	staticContent, err := fs.Sub(staticFS, "static")
+	handler, err := s.handler()
 	if err != nil {
 		return err
 	}
-	mux.Handle("/", http.FileServer(http.FS(staticContent)))
-
-	// REST API
-	mux.HandleFunc("/api/v1/snapshot", s.handleSnapshot)
-	mux.HandleFunc("/api/v1/cpu", s.handleCPU)
-	mux.HandleFunc("/api/v1/memory", s.handleMemory)
-	mux.HandleFunc("/api/v1/disk", s.handleDisk)
-	mux.HandleFunc("/api/v1/network", s.handleNetwork)
-	mux.HandleFunc("/api/v1/processes", s.handleProcesses)
-	mux.HandleFunc("/api/v1/system", s.handleSystem)
-	mux.HandleFunc("/healthz", s.handleHealthz)
-
-	// WebSocket
-	mux.HandleFunc("/ws", s.handleWebSocket)
 
 	s.server = &http.Server{
 		Addr:    s.addr,
-		Handler: withCORS(mux),
+		Handler: handler,
 	}
 
 	// Start WS broadcast loop
-	go s.broadcastLoop()
+	go s.broadcastLoop(context.Background())
 
 	return s.server.ListenAndServe()
 }
@@ -75,13 +66,55 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
 
-func (s *Server) broadcastLoop() {
+func (s *Server) handler() (http.Handler, error) {
+	protectedMux := http.NewServeMux()
+
+	// Static files (embedded SPA)
+	staticContent, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		return nil, err
+	}
+	protectedMux.Handle("/", http.FileServer(http.FS(staticContent)))
+
+	// REST API
+	protectedMux.HandleFunc("/api/v1/snapshot", s.handleSnapshot)
+	protectedMux.HandleFunc("/api/v1/cpu", s.handleCPU)
+	protectedMux.HandleFunc("/api/v1/memory", s.handleMemory)
+	protectedMux.HandleFunc("/api/v1/disk", s.handleDisk)
+	protectedMux.HandleFunc("/api/v1/network", s.handleNetwork)
+	protectedMux.HandleFunc("/api/v1/processes", s.handleProcesses)
+	protectedMux.HandleFunc("/api/v1/system", s.handleSystem)
+
+	// WebSocket
+	protectedMux.HandleFunc("/ws", s.handleWebSocket)
+
+	protectedHandler := http.Handler(protectedMux)
+	if s.auth.enabled() {
+		protectedHandler = s.auth.wrap(protectedHandler)
+	}
+
+	rootMux := http.NewServeMux()
+	rootMux.HandleFunc("/healthz", s.handleHealthz)
+	rootMux.Handle("/", protectedHandler)
+
+	return withCORS(rootMux, !s.auth.enabled()), nil
+}
+
+func (s *Server) broadcastLoop(ctx context.Context) {
 	ch := s.collector.Subscribe("web-hub")
 	defer s.collector.Unsubscribe("web-hub")
 
-	for range ch {
-		if data := s.collector.LatestJSON(); data != nil {
-			s.hub.broadcast(data)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-ch:
+			if !ok {
+				return
+			}
+			if data := s.collector.LatestJSON(); data != nil {
+				s.hub.broadcast(data)
+			}
 		}
 	}
 }
@@ -156,19 +189,16 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
-	writeJSONGzip(w, r, map[string]interface{}{
+	writeJSONGzip(w, r, map[string]any{
 		"status":     "ok",
 		"ws_clients": s.hub.clientCount(),
 	})
 }
 
-// --- WebSocket Handler ---
-
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
-}
-
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	upgrader := websocket.Upgrader{
+		CheckOrigin: s.checkWebSocketOrigin,
+	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("ws upgrade error: %v", err)
@@ -195,15 +225,32 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) checkWebSocketOrigin(r *http.Request) bool {
+	if !s.auth.enabled() {
+		return true
+	}
+
+	originValue := strings.TrimSpace(r.Header.Get("Origin"))
+	if originValue == "" {
+		return true
+	}
+
+	originURL, err := url.Parse(originValue)
+	if err != nil {
+		return false
+	}
+	return sameOriginHost(r.Host, originURL.Host)
+}
+
 // --- Helpers ---
 
-func writeJSON(w http.ResponseWriter, v interface{}) {
+func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
 }
 
 // writeJSONGzip writes JSON with optional gzip compression.
-func writeJSONGzip(w http.ResponseWriter, r *http.Request, v interface{}) {
+func writeJSONGzip(w http.ResponseWriter, r *http.Request, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 		w.Header().Set("Content-Encoding", "gzip")
@@ -215,12 +262,14 @@ func writeJSONGzip(w http.ResponseWriter, r *http.Request, v interface{}) {
 	json.NewEncoder(w).Encode(v)
 }
 
-func withCORS(next http.Handler) http.Handler {
+func withCORS(next http.Handler, enabled bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		if r.Method == http.MethodOptions {
+		if enabled {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		}
+		if enabled && r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}

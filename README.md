@@ -98,6 +98,8 @@ vminfo watch           # stream snapshots continuously
 vminfo watch --json    # stream JSON lines
 vminfo watch --count 1 # single sample then exit
 vminfo --web           # web dashboard on 127.0.0.1:20021
+vminfo --web --token   # auto-generate a dashboard token
+vminfo --web --token secret-token
 vminfo --web --tui     # web + TUI together
 vminfo --web --bind 0.0.0.0 --port 8080
 vminfo ps              # Linux-only process list
@@ -116,8 +118,17 @@ Built-in languages: `en`, `zh`, `de`, `es`, `fr`, `ja`, `ko`, `pt`, `ru`.
 
 ```bash
 vminfo --web                      # default: 127.0.0.1:20021
+vminfo --web --token             # auto-generate a token and print a ready-to-open URL
+vminfo --web --token my-token    # use a fixed token
 vminfo --web --bind 0.0.0.0 --port 8080 --interval 1s
 ```
+
+Add `--token` when you want to protect the dashboard in a browser:
+
+- `--token some-value` uses that exact token
+- bare `--token` auto-generates a URL-safe token
+- the first successful `/?token=...` visit sets a cookie, so later page/API/WebSocket requests can continue without keeping the token in the address bar
+- `GET /healthz` stays public so local probes and health checks still work
 
 When binding to all interfaces, startup output now shows friendlier URLs instead of only `0.0.0.0`:
 
@@ -128,7 +139,19 @@ Web dashboard:
   LAN    http://192.168.1.23:20021   # fallback when only a LAN IPv4 is present
 ```
 
+When a token is enabled, the printed URLs include `?token=...` so you can copy/paste them directly:
+
+```text
+Web dashboard: http://127.0.0.1:20021/?token=secret-token
+```
+
 Web mode keeps stdout quiet during normal browsing: routine HTTP request logs and WebSocket connect/disconnect logs are suppressed, while real startup and error messages are still shown.
+
+With dashboard auth enabled, the web server also tightens browser access rules:
+
+- dashboard pages, JSON APIs, and `/ws` require the token or the auth cookie
+- permissive `Access-Control-Allow-Origin: *` is not exposed in token-protected mode
+- WebSocket upgrades require the browser origin to match the dashboard host
 
 Endpoints:
 
