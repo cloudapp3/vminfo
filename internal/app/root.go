@@ -25,9 +25,9 @@ import (
 	"github.com/cloudapp3/vminfo"
 	"github.com/cloudapp3/vminfo/internal/collector"
 	"github.com/cloudapp3/vminfo/internal/i18n"
-	"github.com/cloudapp3/vminfo/internal/tui"
 	"github.com/cloudapp3/vminfo/internal/updater"
 	"github.com/cloudapp3/vminfo/internal/web"
+	vminfotui "github.com/cloudapp3/vminfo/tui"
 )
 
 var ErrUsage = errors.New("usage")
@@ -223,7 +223,11 @@ func runWeb(ctx context.Context, stdout, stderr io.Writer, tr *i18n.Translator, 
 		if !silent {
 			fmt.Fprintf(stdout, "Starting TUI alongside web dashboard...\n")
 		}
-		return tui.Run(ctx, stdout, tr)
+		return vminfotui.Run(ctx, vminfotui.Options{
+			Stdout: stdout,
+			Stdin:  os.Stdin,
+			Lang:   tr.Locale(),
+		})
 	}
 
 	// Web-only mode: block until signal
@@ -453,7 +457,11 @@ func isLoopbackIP(ip string) bool {
 }
 
 func runInfo(ctx context.Context, w io.Writer, tr *i18n.Translator) error {
-	return tui.Run(ctx, w, tr)
+	return vminfotui.Run(ctx, vminfotui.Options{
+		Stdout: w,
+		Stdin:  os.Stdin,
+		Lang:   tr.Locale(),
+	})
 }
 
 func runSummary(ctx context.Context, stdout, stderr io.Writer, args []string, tr *i18n.Translator) error {

@@ -75,7 +75,7 @@ vminfo 是一个跨平台系统监控工具，帮助你快速看清机器当前�
 - **TUI** — 全屏、实时刷新的终端仪表盘，支持概览和进程视图
 - **JSON** — 面向脚本、CI、监控流水线的机器可读输出
 - **Web 仪表盘** — 浏览器 UI，带 REST 和 WebSocket 接口（`vminfo --web`）
-- **Go 库** — 导入 `github.com/cloudapp3/vminfo`，嵌入你自己的工具
+- **Go 库** — 导入 `github.com/cloudapp3/vminfo` 做指标采集，或导入 `github.com/cloudapp3/vminfo/tui` 嵌入交互式终端 UI
 
 采集指标：CPU（每核）、内存、交换区、磁盘、磁盘 I/O、网络、负载、TCP/UDP 连接数、网卡累计流量/错误/丢包、进程列表、温度、运行时间、主机元数据。
 
@@ -198,6 +198,8 @@ vminfo update --version v0.1.0
 
 ## 支持作为库 import 使用
 
+在自己的 Go 程序里采集主机指标：
+
 ```go
 package main
 
@@ -219,7 +221,30 @@ func main() {
 }
 ```
 
-导出类型：`StaticInfo` · `RuntimeStats` · `ProcessInfo` · `Snapshot` · `AppMetadata`
+在另一个 Go CLI 中启动同款交互式 TUI：
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+
+    vminfotui "github.com/cloudapp3/vminfo/tui"
+)
+
+func main() {
+    if err := vminfotui.Run(context.Background(), vminfotui.Options{Lang: "zh"}); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+`tui.Options` 也支持传入自定义 `Stdin` 和 `Stdout`，方便嵌入其他 CLI 或测试。
+
+公共包：`github.com/cloudapp3/vminfo` · `github.com/cloudapp3/vminfo/tui`
+
+采集相关导出类型：`StaticInfo` · `RuntimeStats` · `ProcessInfo` · `Snapshot` · `AppMetadata`
 
 ## 平台兼容
 

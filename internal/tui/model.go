@@ -98,15 +98,39 @@ type Model struct {
 	cacheDirty    bool
 }
 
+type RunOptions struct {
+	Stdout io.Writer
+	Stdin  io.Reader
+	TR     *i18n.Translator
+}
+
 func Run(ctx context.Context, stdout io.Writer, tr *i18n.Translator) error {
+	return RunWithOptions(ctx, RunOptions{
+		Stdout: stdout,
+		Stdin:  os.Stdin,
+		TR:     tr,
+	})
+}
+
+func RunWithOptions(ctx context.Context, opts RunOptions) error {
+	if opts.Stdout == nil {
+		opts.Stdout = io.Discard
+	}
+	if opts.Stdin == nil {
+		opts.Stdin = os.Stdin
+	}
+	if opts.TR == nil {
+		opts.TR = i18n.New(i18n.Detect())
+	}
+
 	staticInfo, err := vminfo.CollectStatic(ctx)
 	if err != nil {
 		return err
 	}
 	program := tea.NewProgram(
-		newModel(ctx, staticInfo, tr),
-		tea.WithOutput(stdout),
-		tea.WithInput(os.Stdin),
+		newModel(ctx, staticInfo, opts.TR),
+		tea.WithOutput(opts.Stdout),
+		tea.WithInput(opts.Stdin),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)

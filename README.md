@@ -75,7 +75,7 @@ vminfo gives you instant visibility into any host:
 - **TUI** — full-screen, live-updating terminal dashboard with overview and process views
 - **JSON** — machine-readable output for scripts, CI, monitoring pipelines
 - **Web dashboard** — browser-based UI with REST and WebSocket endpoints (`vminfo --web`)
-- **Go library** — import `github.com/cloudapp3/vminfo` and embed collection in your own tools
+- **Go library** — import `github.com/cloudapp3/vminfo` for collection, or `github.com/cloudapp3/vminfo/tui` to embed the interactive terminal UI
 
 Collected metrics: CPU (per-core), memory, swap, disk, disk I/O, network, load, TCP/UDP counts, network interface totals/errors/drops, process list, temperatures, uptime, and host metadata.
 
@@ -198,6 +198,8 @@ Status badges: `LIVE` · `PAUSED` · `LOADING` · `ERROR` · `STALE`
 
 ## Library usage
 
+Collect host metrics from your own Go program:
+
 ```go
 package main
 
@@ -219,7 +221,30 @@ func main() {
 }
 ```
 
-Exported types: `StaticInfo` · `RuntimeStats` · `ProcessInfo` · `Snapshot` · `AppMetadata`
+Launch the same interactive terminal UI from another Go CLI:
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+
+    vminfotui "github.com/cloudapp3/vminfo/tui"
+)
+
+func main() {
+    if err := vminfotui.Run(context.Background(), vminfotui.Options{Lang: "en"}); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+`tui.Options` also accepts custom `Stdin` and `Stdout` streams for embedded CLIs and tests.
+
+Public packages: `github.com/cloudapp3/vminfo` · `github.com/cloudapp3/vminfo/tui`
+
+Exported collection types: `StaticInfo` · `RuntimeStats` · `ProcessInfo` · `Snapshot` · `AppMetadata`
 
 ## Platform support
 
