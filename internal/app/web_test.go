@@ -47,6 +47,32 @@ func TestResolveWebTokenEmpty(t *testing.T) {
 	}
 }
 
+func TestResolveRequestedWebTokenNotRequested(t *testing.T) {
+	token, generated, err := resolveRequestedWebToken("", false)
+	if err != nil {
+		t.Fatalf("resolveRequestedWebToken returned error: %v", err)
+	}
+	if generated {
+		t.Fatal("expected no generation when --token is not requested")
+	}
+	if token != "" {
+		t.Fatalf("expected empty token when --token is not requested, got %q", token)
+	}
+}
+
+func TestResolveRequestedWebTokenBareFlag(t *testing.T) {
+	token, generated, err := resolveRequestedWebToken("", true)
+	if err != nil {
+		t.Fatalf("resolveRequestedWebToken returned error: %v", err)
+	}
+	if !generated {
+		t.Fatal("expected bare --token to generate a token")
+	}
+	if token == "" {
+		t.Fatal("expected generated token to be non-empty")
+	}
+}
+
 func TestWebDashboardListenLinesIncludeToken(t *testing.T) {
 	lines := webDashboardListenLines("127.0.0.1:20021", nil, "secret-token")
 	if len(lines) != 1 {

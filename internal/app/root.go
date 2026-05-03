@@ -48,6 +48,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	webPort := 20021
 	webBind := "127.0.0.1"
 	webTokenFlag := ""
+	webTokenRequested := false
 	tuiMode := false
 	silent := false
 	noUpdateCheck := os.Getenv("VMINFO_NO_UPDATE_CHECK") != ""
@@ -77,14 +78,14 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			webBind = args[i+1]
 			i++
 		case strings.HasPrefix(args[i], "--token="):
+			webTokenRequested = true
 			webTokenFlag = strings.TrimPrefix(args[i], "--token=")
 		case args[i] == "--token":
+			webTokenRequested = true
 			// --token without a value means auto-generate
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				webTokenFlag = args[i+1]
 				i++
-			} else {
-				webTokenFlag = "" // bare --token, will auto-generate via resolveWebToken
 			}
 		case args[i] == "--tui":
 			tuiMode = true
@@ -138,7 +139,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Handle web mode
 	if webMode {
 		addr := fmt.Sprintf("%s:%d", webBind, webPort)
-		webToken, webTokenGenerated, err := resolveWebToken(webTokenFlag, webTokenFlag == "")
+		webToken, webTokenGenerated, err := resolveRequestedWebToken(webTokenFlag, webTokenRequested)
 		if err != nil {
 			return err
 		}
@@ -329,6 +330,13 @@ func resolveWebToken(raw string, autoGenerate bool) (token string, generated boo
 		return token, true, nil
 	}
 	return "", false, nil
+}
+
+func resolveRequestedWebToken(raw string, requested bool) (token string, generated bool, err error) {
+	if !requested {
+		return "", false, nil
+	}
+	return resolveWebToken(raw, strings.TrimSpace(raw) == "")
 }
 
 func generateWebToken() (string, error) {
