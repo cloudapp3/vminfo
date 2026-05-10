@@ -10,6 +10,7 @@ import (
 
 func TestSelectedProcessUsesFilteredList(t *testing.T) {
 	m := newModel(context.Background(), vminfo.StaticInfo{}, i18n.New("en"))
+	m.showKernel = true
 	m.processes = []vminfo.ProcessInfo{
 		{PID: 1, Name: "alpha"},
 		{PID: 2, Name: "beta"},
@@ -29,6 +30,7 @@ func TestSelectedProcessUsesFilteredList(t *testing.T) {
 
 func TestRefreshProcessListStateClampsSelectionToVisibleRows(t *testing.T) {
 	m := newModel(context.Background(), vminfo.StaticInfo{}, i18n.New("en"))
+	m.showKernel = true
 	m.processes = []vminfo.ProcessInfo{
 		{PID: 1, Name: "alpha"},
 		{PID: 2, Name: "beta"},
@@ -53,6 +55,7 @@ func TestRefreshProcessListStateClampsSelectionToVisibleRows(t *testing.T) {
 func TestSelectedProcessUsesVisibleTreeOrder(t *testing.T) {
 	m := newModel(context.Background(), vminfo.StaticInfo{}, i18n.New("en"))
 	m.treeView = true
+	m.showKernel = true
 	m.processes = []vminfo.ProcessInfo{
 		{PID: 2, PPID: 1, Name: "child"},
 		{PID: 3, PPID: 0, Name: "other"},
@@ -76,4 +79,53 @@ func TestSelectedProcessUsesVisibleTreeOrder(t *testing.T) {
 	if second.PID != 2 {
 		t.Fatalf("expected second visible tree process PID 2, got %d", second.PID)
 	}
+}
+
+func TestKernelThreadsHiddenByDefault(t *testing.T) {
+	m := newModel(context.Background(), vminfo.StaticInfo{}, i18n.New("en"))
+	m.processes = []vminfo.ProcessInfo{
+		{PID: 1, PPID: 0, Name: "init", RSSBytes: 4096},
+		{PID: 2, PPID: 0, Name: "kthreadd"},
+		{PID: 100, PPID: 2, Name: "kworker", RSSBytes: 0},
+		{PID: 200, PPID: 1, Name: "sshd", RSSBytes: 8192},
+	}
+	m.refreshProcessListState()
+
+	items := m.filteredProcesses()
+	for _, p := range items {
+		if p.PID == 2 || p.PID == 100 {
+			t.Fatalf("kernel thread leaked into list: %+v", p)
+		}
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 user-space processes, got %d (%+v)", len(items), items)
+	}
+
+	m.showKernel = true
+	m.refreshProcessListState()
+	items = m.filteredProcesses()
+	if len(items) != 4 {
+		t.Fatalf("expected all 4 processes when showKernel=true, got %d", len(items))
+	}
+}
+
+func TestPIDTwoUserProcessIsNotHiddenAsKernelThread(t *testing.T) {
+	m := newModel(context.Background(), vminfo.StaticInfo{}, i18n.New("en"))
+	m.processes = []vminfo.ProcessInfo{
+		{PID: 1, PPID: 0, Name: "bwrap", RSSBytes: 152 * 1024},
+		{PID: 2, PPID: 1, Name: "zsh", RSSBytes: 3792 * 1024},
+		{PID: 100, PPID: 2, Name: "go", RSSBytes: 8192 * 1024},
+	}
+	m.refreshProcessListState()
+
+	items := m.filteredProcesses()
+	if len(items) != 3 {
+		t.Fatalf("expected PID namespace user processes to stay visible, got %d (%+v)", len(items), items)
+	}
+	for _, p := range items {
+		if p.PID == 2 {
+			return
+		}
+	}
+	t.Fatalf("expected normal PID 2 process to stay visible, got %+v", items)
 }

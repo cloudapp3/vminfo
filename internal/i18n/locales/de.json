@@ -163,5 +163,13 @@
   "check for and install updates": "Nach Updates suchen und installieren",
   "skip background update check": "Hintergrund-Update-Prüfung überspringen",
   "TUI, web, summary, watch, ps, kill, update, and version are implemented.": "TUI, web, summary, watch, ps, kill, update und version sind implementiert.",
-  "A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.": "Eine neue Version von vminfo ist verfügbar: %s (aktuell: %s). Führen Sie 'vminfo update' aus, um zu aktualisieren."
+  "A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.": "Eine neue Version von vminfo ist verfügbar: %s (aktuell: %s). Führen Sie 'vminfo update' aus, um zu aktualisieren.",
+  "User:": "Benutzer:",
+  "toggle kernel threads": "Kernel-Threads ein/aus",
+  "kernel threads: shown": "Kernel-Threads: angezeigt",
+  "kernel threads: hidden": "Kernel-Threads: ausgeblendet",
+  "kthreads": "Kernel-Threads",
+  "Compact view. Resize to 70+ cols for System panel.": "Kompaktansicht. Terminal auf 70+ Spalten für das System-Panel vergrößern.",
+  "Send SIGTERM to this process?": "SIGTERM an diesen Prozess senden?",
+  "yes, kill": "ja, beenden"
 }

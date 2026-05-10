@@ -191,6 +191,7 @@ vminfo update --version v0.1.0
 | `t` | 树视图 |
 | `/` | 过滤进程 |
 | `k` | SIGTERM 选中进程 |
+| `K` | 显示 / 隐藏 Linux 内核线程 |
 | `enter` / `y` | 确认终止 |
 | `esc` / `n` | 取消 |
 

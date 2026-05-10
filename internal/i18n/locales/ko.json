@@ -163,5 +163,13 @@
   "check for and install updates": "업데이트 확인 및 설치",
   "skip background update check": "백그라운드 업데이트 확인 건너뛰기",
   "TUI, web, summary, watch, ps, kill, update, and version are implemented.": "TUI, web, summary, watch, ps, kill, update, version이 구현되어 있습니다.",
-  "A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.": "vminfo 새 버전이 있습니다: %s (현재: %s). 'vminfo update'를 실행하여 업그레이드하세요."
+  "A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.": "vminfo 새 버전이 있습니다: %s (현재: %s). 'vminfo update'를 실행하여 업그레이드하세요.",
+  "User:": "사용자:",
+  "toggle kernel threads": "커널 스레드 전환",
+  "kernel threads: shown": "커널 스레드: 표시됨",
+  "kernel threads: hidden": "커널 스레드: 숨김",
+  "kthreads": "커널 스레드",
+  "Compact view. Resize to 70+ cols for System panel.": "간단 보기. 시스템 패널은 70열 이상에서 표시됩니다.",
+  "Send SIGTERM to this process?": "이 프로세스에 SIGTERM을 보내시겠습니까?",
+  "yes, kill": "예, 종료"
 }

@@ -10,11 +10,19 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/gorilla/websocket"
 
 	"github.com/cloudapp3/vminfo/internal/collector"
 )
+
+var gzipPool = sync.Pool{
+	New: func() any {
+		gz, _ := gzip.NewWriterLevel(nil, gzip.BestSpeed)
+		return gz
+	},
+}
 
 //go:embed static/*
 var staticFS embed.FS
@@ -254,8 +262,12 @@ func writeJSONGzip(w http.ResponseWriter, r *http.Request, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 		w.Header().Set("Content-Encoding", "gzip")
-		gz := gzip.NewWriter(w)
-		defer gz.Close()
+		gz := gzipPool.Get().(*gzip.Writer)
+		gz.Reset(w)
+		defer func() {
+			gz.Close()
+			gzipPool.Put(gz)
+		}()
 		json.NewEncoder(gz).Encode(v)
 		return
 	}

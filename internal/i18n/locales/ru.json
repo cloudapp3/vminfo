@@ -163,5 +163,13 @@
   "check for and install updates": "Проверить и установить обновления",
   "skip background update check": "Пропустить фоновую проверку обновлений",
   "TUI, web, summary, watch, ps, kill, update, and version are implemented.": "TUI, web, summary, watch, ps, kill, update и version реализованы.",
-  "A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.": "Доступна новая версия vminfo: %s (текущая: %s). Выполните 'vminfo update' для обновления."
+  "A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.": "Доступна новая версия vminfo: %s (текущая: %s). Выполните 'vminfo update' для обновления.",
+  "User:": "Пользователь:",
+  "toggle kernel threads": "Показать/скрыть потоки ядра",
+  "kernel threads: shown": "Потоки ядра: показаны",
+  "kernel threads: hidden": "Потоки ядра: скрыты",
+  "kthreads": "потоки ядра",
+  "Compact view. Resize to 70+ cols for System panel.": "Компактный вид. Увеличьте терминал до 70+ столбцов для панели системы.",
+  "Send SIGTERM to this process?": "Отправить SIGTERM этому процессу?",
+  "yes, kill": "да, завершить"
 }

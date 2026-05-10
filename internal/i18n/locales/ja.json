@@ -163,5 +163,13 @@
   "check for and install updates": "アップデートを確認してインストール",
   "skip background update check": "バックグラウンドのアップデート確認をスキップ",
   "TUI, web, summary, watch, ps, kill, update, and version are implemented.": "TUI、web、summary、watch、ps、kill、update、version が実装済みです。",
-  "A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.": "vminfo の新バージョンが利用可能です: %s (現在: %s)。'vminfo update' を実行してアップグレードしてください。"
+  "A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.": "vminfo の新バージョンが利用可能です: %s (現在: %s)。'vminfo update' を実行してアップグレードしてください。",
+  "User:": "ユーザー:",
+  "toggle kernel threads": "カーネルスレッドを切り替え",
+  "kernel threads: shown": "カーネルスレッド: 表示中",
+  "kernel threads: hidden": "カーネルスレッド: 非表示",
+  "kthreads": "カーネルスレッド",
+  "Compact view. Resize to 70+ cols for System panel.": "コンパクト表示。システムパネルは 70 列以上で表示されます。",
+  "Send SIGTERM to this process?": "このプロセスに SIGTERM を送信しますか？",
+  "yes, kill": "はい、終了"
 }

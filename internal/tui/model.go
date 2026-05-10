@@ -21,6 +21,7 @@ import (
 const (
 	defaultRefreshInterval = 3 * time.Second
 	sampleInterval         = 200 * time.Millisecond
+	firstSampleInterval    = 50 * time.Millisecond
 	maxCPUHistory          = 60
 )
 
@@ -83,6 +84,7 @@ type Model struct {
 	cpuHistory      []float64
 	treeView        bool
 	filterActive    bool
+	showKernel      bool
 	refreshInterval time.Duration
 	tr              *i18n.Translator
 
@@ -165,7 +167,7 @@ func (m Model) layoutMode() layoutMode {
 		return layoutWide
 	case m.width >= 100:
 		return layoutMedium
-	case m.width >= 80:
+	case m.width >= 70:
 		return layoutNarrow
 	default:
 		return layoutCompact
@@ -174,7 +176,8 @@ func (m Model) layoutMode() layoutMode {
 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
-		fetchStatsCmd(m.ctx),
+		fetchStatsCmdInterval(m.ctx, firstSampleInterval),
+		fetchProcessesCmd(m.ctx),
 		tickCmd(m.refreshInterval),
 		m.spinner.Tick,
 		setWindowTitleCmd(m),
@@ -342,7 +345,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	switch strings.ToLower(strings.TrimSpace(msg.String())) {
+	rawKey := strings.TrimSpace(msg.String())
+	if rawKey == "K" && m.view == viewProcesses {
+		m.showKernel = !m.showKernel
+		if m.showKernel {
+			m.statusText = m.tr.T("kernel threads: shown")
+		} else {
+			m.statusText = m.tr.T("kernel threads: hidden")
+		}
+		m.selected = 0
+		m.refreshProcessListState()
+		return m, nil
+	}
+
+	switch strings.ToLower(rawKey) {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 	case "?":
@@ -504,7 +520,14 @@ func (m Model) selectableProcesses() []vminfo.ProcessInfo {
 // Must be called from pointer-receiver contexts (Update handlers).
 func (m *Model) rebuildProcessCache() {
 	m.cacheDirty = false
-	items := append([]vminfo.ProcessInfo(nil), m.processes...)
+	kernelRootPID := kernelThreadRootPID(m.processes)
+	items := make([]vminfo.ProcessInfo, 0, len(m.processes))
+	for _, p := range m.processes {
+		if !m.showKernel && isKernelThread(p, kernelRootPID) {
+			continue
+		}
+		items = append(items, p)
+	}
 	sort.SliceStable(items, func(i, j int) bool {
 		left := items[i]
 		right := items[j]
@@ -551,7 +574,14 @@ func (m Model) sortedProcesses() []vminfo.ProcessInfo {
 	if !m.cacheDirty && m.sortedCache != nil {
 		return m.sortedCache
 	}
-	items := append([]vminfo.ProcessInfo(nil), m.processes...)
+	kernelRootPID := kernelThreadRootPID(m.processes)
+	items := make([]vminfo.ProcessInfo, 0, len(m.processes))
+	for _, p := range m.processes {
+		if !m.showKernel && isKernelThread(p, kernelRootPID) {
+			continue
+		}
+		items = append(items, p)
+	}
 	sort.SliceStable(items, func(i, j int) bool {
 		left := items[i]
 		right := items[j]
@@ -609,8 +639,12 @@ func (m Model) buildProcessTree() []treeNode {
 	pidSet := make(map[int32]bool, len(m.processes))
 	childrenMap := make(map[int32][]int32)
 	procMap := make(map[int32]vminfo.ProcessInfo)
+	kernelRootPID := kernelThreadRootPID(m.processes)
 
 	for _, p := range m.processes {
+		if !m.showKernel && isKernelThread(p, kernelRootPID) {
+			continue
+		}
 		pidSet[p.PID] = true
 		procMap[p.PID] = p
 		childrenMap[p.PPID] = append(childrenMap[p.PPID], p.PID)
@@ -618,6 +652,9 @@ func (m Model) buildProcessTree() []treeNode {
 
 	var roots []int32
 	for _, p := range m.processes {
+		if !m.showKernel && isKernelThread(p, kernelRootPID) {
+			continue
+		}
 		if p.PPID == 0 || !pidSet[p.PPID] {
 			roots = append(roots, p.PID)
 		}
@@ -666,6 +703,31 @@ func clampIndex(index, total int) int {
 	return index
 }
 
+// kernelThreadRootPID returns the Linux kthreadd PID for a host process list.
+// PID 2 is only treated as a kernel root when its name is actually kthreadd;
+// inside PID namespaces PID 2 can be a normal user-space process.
+func kernelThreadRootPID(items []vminfo.ProcessInfo) int32 {
+	for _, p := range items {
+		if p.PID == 2 && strings.TrimSpace(p.Name) == "kthreadd" {
+			return p.PID
+		}
+	}
+	return 0
+}
+
+// isKernelThread reports whether p is a kthreadd-owned kernel thread.
+// The caller must pass a verified kthreadd PID to avoid hiding normal
+// PID-namespace processes that happen to use PID/PPID 2.
+func isKernelThread(p vminfo.ProcessInfo, kernelRootPID int32) bool {
+	if kernelRootPID <= 0 {
+		return false
+	}
+	if p.PID == kernelRootPID {
+		return true
+	}
+	return p.PPID == kernelRootPID && p.RSSBytes == 0
+}
+
 func tickCmd(interval time.Duration) tea.Cmd {
 	return tea.Tick(interval, func(time.Time) tea.Msg {
 		return tickMsg{}
@@ -673,8 +735,12 @@ func tickCmd(interval time.Duration) tea.Cmd {
 }
 
 func fetchStatsCmd(ctx context.Context) tea.Cmd {
+	return fetchStatsCmdInterval(ctx, sampleInterval)
+}
+
+func fetchStatsCmdInterval(ctx context.Context, interval time.Duration) tea.Cmd {
 	return func() tea.Msg {
-		stats, err := vminfo.CollectStats(ctx, vminfo.Options{SampleInterval: sampleInterval})
+		stats, err := vminfo.CollectStats(ctx, vminfo.Options{SampleInterval: interval})
 		return statsMsg{stats: stats, err: err}
 	}
 }

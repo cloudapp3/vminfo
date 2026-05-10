@@ -165,5 +165,13 @@
   "check for and install updates": "检查并安装更新",
   "skip background update check": "跳过后台更新检查",
   "TUI, web, summary, watch, ps, kill, update, and version are implemented.": "TUI、web、summary、watch、ps、kill、update 和 version 均已实现。",
-  "A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.": "vminfo 有新版本可用: %s (当前: %s)。运行 'vminfo update' 进行升级。"
+  "A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.": "vminfo 有新版本可用: %s (当前: %s)。运行 'vminfo update' 进行升级。",
+  "User:": "用户:",
+  "toggle kernel threads": "切换内核线程",
+  "kernel threads: shown": "内核线程：已显示",
+  "kernel threads: hidden": "内核线程：已隐藏",
+  "kthreads": "内核线程",
+  "Compact view. Resize to 70+ cols for System panel.": "紧凑视图。终端宽度至少 70 列可显示系统面板。",
+  "Send SIGTERM to this process?": "向该进程发送 SIGTERM？",
+  "yes, kill": "是，终止"
 }

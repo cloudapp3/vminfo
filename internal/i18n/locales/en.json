@@ -13,5 +13,13 @@
   "check for and install updates": "check for and install updates",
   "skip background update check": "skip background update check",
   "TUI, web, summary, watch, ps, kill, update, and version are implemented.": "TUI, web, summary, watch, ps, kill, update, and version are implemented.",
-  "A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.": "A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade."
+  "A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.": "A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.",
+  "User:": "User:",
+  "toggle kernel threads": "toggle kernel threads",
+  "kernel threads: shown": "kernel threads: shown",
+  "kernel threads: hidden": "kernel threads: hidden",
+  "kthreads": "kthreads",
+  "Compact view. Resize to 70+ cols for System panel.": "Compact view. Resize to 70+ cols for System panel.",
+  "Send SIGTERM to this process?": "Send SIGTERM to this process?",
+  "yes, kill": "yes, kill"
 }

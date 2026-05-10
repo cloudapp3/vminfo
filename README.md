@@ -191,6 +191,7 @@ Recent web UI polish:
 | `t` | Tree view |
 | `/` | Filter processes |
 | `k` | SIGTERM selected process |
+| `K` | Show / hide Linux kernel threads |
 | `enter` / `y` | Confirm kill |
 | `esc` / `n` | Cancel |
 

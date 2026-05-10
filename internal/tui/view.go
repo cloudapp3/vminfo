@@ -42,7 +42,8 @@ var (
 func (m Model) View() string {
 	var content string
 	if m.killConfirm {
-		content = m.renderKillConfirm()
+		// kill confirm uses lipgloss.Place which already fills the screen
+		return m.renderKillConfirm()
 	} else if m.showHelp {
 		content = m.renderHelp()
 	} else {
@@ -139,15 +140,40 @@ func (m Model) renderOverview() string {
 		return lipgloss.JoinVertical(lipgloss.Left, sysCard, diskCard, resCard, netCard)
 
 	default:
-		// < 80: compact — only Resources + Network
+		// < 70: compact — tiny System summary line + Resources + Network
+		sysLine := subtleStyle.Render(m.renderSystemOneLine(fullW))
 		resCard := makePanel(fullW).Render(m.renderResourceContent())
 		netCard := makePanel(fullW).Render(m.renderNetworkContent())
-		compactHint := subtleStyle.Render(m.tr.T("Terminal too narrow, showing compact view. Resize for full dashboard."))
-		return lipgloss.JoinVertical(lipgloss.Left, resCard, netCard, compactHint)
+		compactHint := subtleStyle.Render(m.tr.T("Compact view. Resize to 70+ cols for System panel."))
+		return lipgloss.JoinVertical(lipgloss.Left, sysLine, resCard, netCard, compactHint)
 	}
 }
 
 // ── Panel content renderers (no border, border applied by caller) ────
+
+// renderSystemOneLine produces a single-line system summary for tight layouts.
+func (m Model) renderSystemOneLine(width int) string {
+	parts := []string{}
+	if h := strings.TrimSpace(m.static.Hostname); h != "" {
+		parts = append(parts, valueStyle.Render(h))
+	}
+	if v := strings.TrimSpace(firstNonEmpty(m.static.Platform, m.static.OS, "")); v != "" {
+		ver := strings.TrimSpace(m.static.OSVersion)
+		if ver != "" {
+			v += " " + ver
+		}
+		parts = append(parts, subtleStyle.Render(v))
+	}
+	if m.hasStats {
+		parts = append(parts, subtleStyle.Render(m.tr.T("Uptime")+" "+formatUptime(m.stats.Uptime)))
+		parts = append(parts, subtleStyle.Render(m.tr.T("Procs")+" "+fmt.Sprintf("%d", m.stats.ProcessCount)))
+	}
+	out := " " + strings.Join(parts, subtleStyle.Render(" │ "))
+	if width > 0 {
+		return truncate(out, width)
+	}
+	return out
+}
 
 func (m Model) renderSystemContent() string {
 	sysW := sysInnerWidth(m.width)
@@ -971,13 +997,21 @@ func (m Model) renderProcesses() string {
 		headerLines = append(headerLines, subtleStyle.Render(m.tr.Tf("filter: %s  (%d matches)", m.filterInput.Value(), len(items))))
 	}
 
-	// Dynamic column widths — NAME absorbs remaining space
+	// Dynamic column widths — USER auto-fits content, NAME absorbs remaining.
 	colPID := 8
 	colCPU := 7
 	colMEM := 6
 	colRSS := 9
-	colUser := 10
 	colGap := 2
+	colUser := 4 // minimum for "USER" header
+	for _, item := range items {
+		if u := firstNonEmpty(item.User, "-"); len(u) > colUser {
+			colUser = len(u)
+		}
+	}
+	if colUser > 16 {
+		colUser = 16
+	}
 	fixedW := 4 + colPID + colCPU + colMEM + colRSS + colUser + colGap*6 // sel marker + gaps
 	colName := max(innerW-fixedW, 12)
 
@@ -1118,6 +1152,7 @@ func (m Model) renderHelp() string {
 		{"t", m.tr.T("toggle tree view")},
 		{"/", m.tr.T("filter processes by name")},
 		{"k", m.tr.T("kill selected process")},
+		{"K", m.tr.T("toggle kernel threads")},
 		{"enter / y", m.tr.T("confirm kill")},
 		{"esc / n", m.tr.T("cancel")},
 	}
@@ -1137,16 +1172,37 @@ func (m Model) renderKillConfirm() string {
 	if !ok {
 		target = m.killTarget
 	}
-	lines := []string{
-		m.panelTitle("Confirm Kill"),
+
+	title := lipgloss.NewStyle().Bold(true).Foreground(CRed).Render("⚠ " + m.tr.T("Confirm Kill"))
+	pidLabel := subtleStyle.Render(m.tr.T("PID:"))
+	pidVal := lipgloss.NewStyle().Foreground(CInfo).Bold(true).Render(fmt.Sprintf("%d", target.PID))
+	nameLabel := subtleStyle.Render(m.tr.T("Name:"))
+	nameVal := valueStyle.Render(firstNonEmpty(target.Name, "-"))
+	userLabel := subtleStyle.Render(m.tr.T("User:"))
+	userVal := lipgloss.NewStyle().Foreground(CDim).Render(firstNonEmpty(target.User, "-"))
+
+	body := []string{
+		title,
 		"",
-		lipgloss.NewStyle().Foreground(CText).Render(
-			fmt.Sprintf("  "+m.tr.T("Send SIGTERM to PID %d (%s)?"), target.PID, firstNonEmpty(target.Name, "-"))),
+		pidLabel + " " + pidVal + "    " + nameLabel + " " + nameVal,
+		userLabel + " " + userVal,
 		"",
-		warnStyle.Render("  " + m.tr.T("Enter / y to confirm")),
-		subtleStyle.Render("  " + m.tr.T("Esc / n to cancel")),
+		warnStyle.Render(m.tr.T("Send SIGTERM to this process?")),
+		"",
+		lipgloss.NewStyle().Foreground(COk).Bold(true).Render("[ Y ]") + " " + subtleStyle.Render(m.tr.T("yes, kill")) +
+			"    " + lipgloss.NewStyle().Foreground(CRed).Bold(true).Render("[ N ]") + " " + subtleStyle.Render(m.tr.T("cancel")),
 	}
-	return outerStyle.Render(panelStyle.Render(strings.Join(lines, "\n")))
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(CRed).
+		Padding(1, 3).
+		Render(strings.Join(body, "\n"))
+
+	if m.width <= 0 || m.height <= 0 {
+		return outerStyle.Render(box)
+	}
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
 // ── Status & Footer ─────────────────────────────────────────────────
@@ -1211,7 +1267,7 @@ func (m Model) hintsForMode() string {
 	case m.filterInput.Focused():
 		return dimStyle.Render(m.tr.T("type to filter")+" ") + hint("enter", m.tr.T("confirm")) + hint("esc", m.tr.T("cancel"))
 	case m.view == viewProcesses:
-		base := hint("tab", m.tr.T("view")) + hint("↑↓", m.tr.T("select")) + hint("s", m.tr.T("sort")) + hint("t", m.tr.T("tree")) + hint("/", m.tr.T("filter")) + hint("k", "kill") + hint("p", m.tr.T("pause")) + hint("r", m.tr.T("refresh")) + hint("?", m.tr.T("help")) + hint("q", m.tr.T("exit"))
+		base := hint("tab", m.tr.T("view")) + hint("↑↓", m.tr.T("select")) + hint("s", m.tr.T("sort")) + hint("t", m.tr.T("tree")) + hint("/", m.tr.T("filter")) + hint("k", "kill") + hint("K", m.tr.T("kthreads")) + hint("p", m.tr.T("pause")) + hint("r", m.tr.T("refresh")) + hint("?", m.tr.T("help")) + hint("q", m.tr.T("exit"))
 		return base
 	default:
 		return hint("tab", m.tr.T("view")) + hint("+/-", m.tr.T("interval")) + hint("p", m.tr.T("pause")) + hint("r", m.tr.T("refresh")) + hint("?", m.tr.T("help")) + hint("q", m.tr.T("exit"))
@@ -1284,6 +1340,9 @@ func formatBytes(bytes uint64) string {
 	}
 	if i == 0 {
 		return fmt.Sprintf("%dB", bytes)
+	}
+	if value >= 10 {
+		return fmt.Sprintf("%.0f%s", value, units[i])
 	}
 	return fmt.Sprintf("%.1f%s", value, units[i])
 }

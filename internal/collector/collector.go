@@ -229,10 +229,11 @@ func (c *Collector) collectOnce(ctx context.Context) {
 	historyCopy := c.history.slice()
 
 	snap := BuildSnapshot(staticInfo, stats, procs, historyCopy)
+	data, _ := json.Marshal(snap)
 
 	c.mu.Lock()
 	c.snapshot = &snap
-	c.cachedJSON, _ = json.Marshal(snap)
+	c.cachedJSON = data
 	c.mu.Unlock()
 
 	// Broadcast to subscribers (non-blocking)
