@@ -1,14 +1,18 @@
 package web
 
 import (
+	"cmp"
 	"compress/gzip"
 	"context"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -92,6 +96,7 @@ func (s *Server) handler() (http.Handler, error) {
 	protectedMux.HandleFunc("/api/v1/network", s.handleNetwork)
 	protectedMux.HandleFunc("/api/v1/processes", s.handleProcesses)
 	protectedMux.HandleFunc("/api/v1/system", s.handleSystem)
+	protectedMux.HandleFunc("/api/v1/health", s.handleHealth)
 
 	// WebSocket
 	protectedMux.HandleFunc("/ws", s.handleWebSocket)
@@ -179,12 +184,21 @@ func (s *Server) handleNetwork(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProcesses(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	snap := s.collector.LatestWithProcesses(r.Context())
 	if snap == nil {
 		http.Error(w, "no data yet", http.StatusServiceUnavailable)
 		return
 	}
-	writeJSONGzip(w, r, snap.Processes)
+	opts, err := parseProcessQuery(r.URL.Query())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSONGzip(w, r, applyProcessQuery(snap.Processes, opts))
 }
 
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
@@ -194,6 +208,15 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONGzip(w, r, snap.System)
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	snap := s.collector.LatestWithProcesses(r.Context())
+	if snap == nil {
+		http.Error(w, "no data yet", http.StatusServiceUnavailable)
+		return
+	}
+	writeJSONGzip(w, r, snap.Health)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
@@ -287,4 +310,107 @@ func withCORS(next http.Handler, enabled bool) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+type processQueryOptions struct {
+	filter  string
+	sortKey string
+	limit   int
+}
+
+func parseProcessQuery(values url.Values) (processQueryOptions, error) {
+	opts := processQueryOptions{
+		filter:  firstNonEmptyQuery(values, "filter", "q"),
+		sortKey: strings.ToLower(strings.TrimSpace(values.Get("sort"))),
+	}
+	if opts.sortKey == "" {
+		opts.sortKey = "cpu"
+	}
+
+	limitValue := strings.TrimSpace(values.Get("limit"))
+	if limitValue == "" {
+		return opts, nil
+	}
+	limit, err := strconv.Atoi(limitValue)
+	if err != nil || limit < 0 {
+		return processQueryOptions{}, fmt.Errorf("limit must be a non-negative integer")
+	}
+	opts.limit = limit
+	return opts, nil
+}
+
+func applyProcessQuery(info collector.ProcessInfo, opts processQueryOptions) collector.ProcessInfo {
+	items := make([]collector.ProcessEntry, 0, len(info.List))
+	for _, item := range info.List {
+		if processEntryMatches(item, opts.filter) {
+			items = append(items, item)
+		}
+	}
+
+	sortProcessEntries(items, opts.sortKey)
+	if opts.limit > 0 && opts.limit < len(items) {
+		items = items[:opts.limit]
+	}
+
+	return collector.ProcessInfo{
+		Total: info.Total,
+		List:  items,
+	}
+}
+
+func sortProcessEntries(items []collector.ProcessEntry, sortKey string) {
+	sortKey = strings.ToLower(strings.TrimSpace(sortKey))
+	slices.SortFunc(items, func(a, b collector.ProcessEntry) int {
+		switch sortKey {
+		case "mem":
+			if a.MemPercent != b.MemPercent {
+				return cmp.Compare(b.MemPercent, a.MemPercent)
+			}
+		case "pid":
+			if a.PID != b.PID {
+				return cmp.Compare(a.PID, b.PID)
+			}
+		case "name":
+			aName := strings.ToLower(strings.TrimSpace(a.Name))
+			bName := strings.ToLower(strings.TrimSpace(b.Name))
+			if aName != bName {
+				return cmp.Compare(aName, bName)
+			}
+		default:
+			if a.CPUPercent != b.CPUPercent {
+				return cmp.Compare(b.CPUPercent, a.CPUPercent)
+			}
+		}
+		return cmp.Compare(a.PID, b.PID)
+	})
+}
+
+func processEntryMatches(item collector.ProcessEntry, filter string) bool {
+	query := strings.ToLower(strings.TrimSpace(filter))
+	if query == "" {
+		return true
+	}
+	fields := []string{
+		strconv.FormatInt(int64(item.PID), 10),
+		strconv.FormatInt(int64(item.PPID), 10),
+		item.Name,
+		item.Command,
+		item.User,
+		item.Status,
+	}
+	for _, field := range fields {
+		if strings.Contains(strings.ToLower(field), query) {
+			return true
+		}
+	}
+	return false
+}
+
+func firstNonEmptyQuery(values url.Values, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(values.Get(key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }

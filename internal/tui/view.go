@@ -947,7 +947,9 @@ func (m Model) renderProcessTree() string {
 			subtleStyle.Render("  "+m.tr.T("State:")) + lipgloss.NewStyle().Foreground(stateColor).Render(" "+firstNonEmpty(selected.State, "-")) +
 			subtleStyle.Render("  "+m.tr.T("CPU:")) + lipgloss.NewStyle().Foreground(ThresholdColor(selected.CPUPercent)).Render(fmt.Sprintf(" %.1f%%", selected.CPUPercent)) +
 			subtleStyle.Render("  "+m.tr.T("Mem:")) + lipgloss.NewStyle().Foreground(ThresholdColor(float64(selected.MemoryPercent))).Render(fmt.Sprintf(" %.1f%%", selected.MemoryPercent)) +
-			subtleStyle.Render("  "+m.tr.T("RSS:")) + lipgloss.NewStyle().Foreground(CDim).Render(" "+formatBytes(selected.RSSBytes))
+			subtleStyle.Render("  "+m.tr.T("RSS:")) + lipgloss.NewStyle().Foreground(CDim).Render(" "+formatBytes(selected.RSSBytes)) +
+			subtleStyle.Render("  "+m.tr.T("Age:")) + lipgloss.NewStyle().Foreground(CDim).Render(" "+formatUptime(selected.Uptime)) +
+			subtleStyle.Render("  "+m.tr.T("Cmd:")) + lipgloss.NewStyle().Foreground(CDim).Render(" "+truncate(firstNonEmpty(selected.Command, selected.Name, "-"), 80))
 	}
 
 	allLines := append(headerLines, rowLines...)
@@ -1114,7 +1116,11 @@ func (m Model) renderProcesses() string {
 			subtleStyle.Render("  "+m.tr.T("State:")) + lipgloss.NewStyle().Foreground(stateColor).Render(" "+firstNonEmpty(selected.State, "-")) +
 			subtleStyle.Render("  "+m.tr.T("CPU:")) + lipgloss.NewStyle().Foreground(ThresholdColor(selected.CPUPercent)).Render(fmt.Sprintf(" %.1f%%", selected.CPUPercent)) +
 			subtleStyle.Render("  "+m.tr.T("Mem:")) + lipgloss.NewStyle().Foreground(ThresholdColor(float64(selected.MemoryPercent))).Render(fmt.Sprintf(" %.1f%%", selected.MemoryPercent)) +
-			subtleStyle.Render("  "+m.tr.T("RSS:")) + lipgloss.NewStyle().Foreground(CDim).Render(" "+formatBytes(selected.RSSBytes))
+			subtleStyle.Render("  "+m.tr.T("RSS:")) + lipgloss.NewStyle().Foreground(CDim).Render(" "+formatBytes(selected.RSSBytes)) +
+			subtleStyle.Render("  "+m.tr.T("Age:")) + lipgloss.NewStyle().Foreground(CDim).Render(" "+formatUptime(selected.Uptime)) +
+			subtleStyle.Render("  "+m.tr.T("Threads:")) + lipgloss.NewStyle().Foreground(CDim).Render(fmt.Sprintf(" %d", selected.Threads)) +
+			subtleStyle.Render("  "+m.tr.T("Nice:")) + lipgloss.NewStyle().Foreground(CDim).Render(fmt.Sprintf(" %d", selected.Nice)) +
+			subtleStyle.Render("  "+m.tr.T("Cmd:")) + lipgloss.NewStyle().Foreground(CDim).Render(" "+truncate(firstNonEmpty(selected.Command, selected.Name, "-"), 100))
 	}
 
 	// Build viewport content: header + all rows

@@ -133,6 +133,7 @@ func (c *Collector) LatestWithProcesses(ctx context.Context) *Snapshot {
 		Total: len(procs),
 		List:  buildProcessEntries(procs),
 	}
+	snap.Health = buildHealthFromSnapshot(snap)
 	return &snap
 }
 
@@ -161,6 +162,7 @@ func (c *Collector) LatestJSONWithProcesses(ctx context.Context) []byte {
 		Total: len(procs),
 		List:  buildProcessEntries(procs),
 	}
+	snap.Health = buildHealthFromSnapshot(snap)
 
 	data, err := json.Marshal(snap)
 	if err != nil {

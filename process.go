@@ -7,6 +7,7 @@ type ProcessInfo struct {
 	PID           int32   `json:"pid"`
 	PPID          int32   `json:"ppid,omitempty"`
 	Name          string  `json:"name,omitempty"`
+	Command       string  `json:"command,omitempty"`
 	User          string  `json:"user,omitempty"`
 	State         string  `json:"state,omitempty"`
 	CPUPercent    float64 `json:"cpu_percent,omitempty"`
@@ -15,6 +16,7 @@ type ProcessInfo struct {
 	Threads       int32   `json:"threads,omitempty"`
 	Nice          int32   `json:"nice,omitempty"`
 	Uptime        uint64  `json:"uptime,omitempty"`
+	StartedAtUnix int64   `json:"started_at_unix,omitempty"`
 }
 
 // ListProcesses returns local processes on Linux and an unsupported error on

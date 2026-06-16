@@ -103,6 +103,11 @@ vminfo --web --token secret-token
 vminfo --web --tui     # web + TUI together
 vminfo --web --bind 0.0.0.0 --port 8080
 vminfo ps              # Linux-only process list
+vminfo ps nginx        # filter by name, user, pid, or command
+vminfo ps --filter ssh # explicit process filter for scripts
+vminfo ps --tree       # render a process tree
+vminfo ps --watch      # refresh process table continuously
+vminfo ps --limit 20   # show the first 20 rows after sort/filter
 vminfo ps --json       # processes as JSON
 vminfo ps --sort mem   # sort by cpu|mem|pid|name
 vminfo kill <pid>      # SIGTERM a process (Linux)
@@ -157,6 +162,8 @@ Endpoints:
 
 - `GET /healthz` — health check
 - `GET /api/v1/snapshot` — current snapshot JSON
+- `GET /api/v1/processes` — process list with optional `filter` / `q`, `sort`, and `limit` query parameters
+- `GET /api/v1/health` — lightweight health score and resource warnings
 - `GET /ws` — live WebSocket stream
 
 ## Self-update
@@ -308,6 +315,8 @@ go run ./cmd/vminfo summary --json
 ## Documentation
 
 - [docs/README.zh-CN.md](docs/README.zh-CN.md)
+- [docs/api.md](docs/api.md)
+- [docs/feature-benchmark.md](docs/feature-benchmark.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [docs/CHANGELOG.md](docs/CHANGELOG.md)
 

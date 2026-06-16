@@ -557,10 +557,9 @@ func (m *Model) rebuildProcessCache() {
 
 	filterText := m.filterInput.Value()
 	if m.filterActive || (m.filterInput.Focused() && filterText != "") {
-		query := strings.ToLower(filterText)
 		filtered := make([]vminfo.ProcessInfo, 0, len(items))
 		for _, item := range items {
-			if strings.Contains(strings.ToLower(item.Name), query) {
+			if processMatchesFilter(item, filterText) {
 				filtered = append(filtered, item)
 			}
 		}
@@ -619,14 +618,34 @@ func (m Model) filteredProcesses() []vminfo.ProcessInfo {
 	if !m.filterActive && !m.filterInput.Focused() || filterText == "" {
 		return items
 	}
-	query := strings.ToLower(filterText)
 	filtered := make([]vminfo.ProcessInfo, 0, len(items))
 	for _, item := range items {
-		if strings.Contains(strings.ToLower(item.Name), query) {
+		if processMatchesFilter(item, filterText) {
 			filtered = append(filtered, item)
 		}
 	}
 	return filtered
+}
+
+func processMatchesFilter(item vminfo.ProcessInfo, filter string) bool {
+	query := strings.ToLower(strings.TrimSpace(filter))
+	if query == "" {
+		return true
+	}
+	fields := []string{
+		renderPID(item.PID),
+		renderPID(item.PPID),
+		item.Name,
+		item.Command,
+		item.User,
+		item.State,
+	}
+	for _, field := range fields {
+		if strings.Contains(strings.ToLower(field), query) {
+			return true
+		}
+	}
+	return false
 }
 
 type treeNode struct {

@@ -67,7 +67,15 @@
             </div>
         </section>
 
-        <!-- Row 4: Processes -->
+        <!-- Row 4: Health Summary -->
+        <section class="panel panel-full" id="panel-health">
+            <h2><span class="icon">&#9888;</span> Health Summary</h2>
+            <div class="panel-body">
+                <div class="health-summary" id="health-summary"></div>
+            </div>
+        </section>
+
+        <!-- Row 5: Processes -->
         <section class="panel panel-full" id="panel-processes">
             <h2>
                 <span class="icon">&#128203;</span> Processes
@@ -92,7 +100,9 @@
                             <th class="col-rss">RSS</th>
                             <th class="col-user">USER</th>
                             <th class="col-status">ST</th>
+                            <th class="col-age">AGE</th>
                             <th class="col-name">NAME</th>
+                            <th class="col-command">COMMAND</th>
                         </tr>
                     </thead>
                     <tbody id="proc-tbody"></tbody>

@@ -103,6 +103,11 @@ vminfo --web --token secret-token
 vminfo --web --tui     # Web + TUI 同时运行
 vminfo --web --bind 0.0.0.0 --port 8080
 vminfo ps              # Linux-only 进程列表
+vminfo ps nginx        # 按名称、用户、PID 或命令过滤
+vminfo ps --filter ssh # 面向脚本的显式过滤参数
+vminfo ps --tree       # 渲染进程树
+vminfo ps --watch      # 持续刷新进程表
+vminfo ps --limit 20   # 排序 / 过滤后只显示前 20 行
 vminfo ps --json       # 进程列表 JSON
 vminfo ps --sort mem   # 按 cpu|mem|pid|name 排序
 vminfo kill <pid>      # 向进程发送 SIGTERM（Linux）
@@ -157,6 +162,8 @@ Web 模式下普通浏览访问保持安静：默认不再输出 HTTP 访问日�
 
 - `GET /healthz` — 健康检查
 - `GET /api/v1/snapshot` — 当前快照 JSON
+- `GET /api/v1/processes` — 进程列表，支持 `filter` / `q`、`sort`、`limit` 查询参数
+- `GET /api/v1/health` — 轻量健康评分和资源告警
 - `GET /ws` — 实时 WebSocket 流
 
 ## 更新命令
@@ -308,6 +315,8 @@ go run ./cmd/vminfo summary --json
 ## 文档
 
 - [../README.md](../README.md)
+- [api.md](api.md)
+- [feature-benchmark.md](feature-benchmark.md)
 - [../CONTRIBUTING.md](../CONTRIBUTING.md)
 - [CHANGELOG.md](CHANGELOG.md)
 

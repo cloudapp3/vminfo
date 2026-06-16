@@ -19,6 +19,7 @@ type Snapshot struct {
 	Network   NetworkInfo `json:"network"`
 	Load      LoadInfo    `json:"load"`
 	Processes ProcessInfo `json:"processes"`
+	Health    HealthInfo  `json:"health"`
 }
 
 type SystemInfo struct {
@@ -105,14 +106,30 @@ type ProcessInfo struct {
 }
 
 type ProcessEntry struct {
-	PID        int32   `json:"pid"`
-	Name       string  `json:"name"`
-	User       string  `json:"user"`
-	CPUPercent float64 `json:"cpu_percent"`
-	MemPercent float32 `json:"mem_percent"`
-	RSS        uint64  `json:"rss"`
-	Status     string  `json:"status"`
-	Command    string  `json:"command"`
+	PID           int32   `json:"pid"`
+	PPID          int32   `json:"ppid,omitempty"`
+	Name          string  `json:"name"`
+	User          string  `json:"user"`
+	CPUPercent    float64 `json:"cpu_percent"`
+	MemPercent    float32 `json:"mem_percent"`
+	RSS           uint64  `json:"rss"`
+	Status        string  `json:"status"`
+	Command       string  `json:"command"`
+	Threads       int32   `json:"threads,omitempty"`
+	Nice          int32   `json:"nice,omitempty"`
+	Uptime        uint64  `json:"uptime,omitempty"`
+	StartedAtUnix int64   `json:"started_at_unix,omitempty"`
+}
+
+type HealthInfo struct {
+	Score    int             `json:"score"`
+	Warnings []HealthWarning `json:"warnings"`
+}
+
+type HealthWarning struct {
+	Level   string `json:"level"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 // BuildSnapshot creates a Snapshot from existing vminfo package data.
@@ -125,13 +142,13 @@ func BuildSnapshot(
 	memPercent := float64(0)
 	avail := uint64(0)
 	if static.MemTotal > 0 {
-		memPercent = float64(stats.MemUsed) / float64(static.MemTotal) * 100
+		memPercent = percent(stats.MemUsed, static.MemTotal)
 		avail = static.MemTotal - stats.MemUsed
 	}
 
 	swapPercent := float64(0)
 	if static.SwapTotal > 0 {
-		swapPercent = float64(stats.SwapUsed) / float64(static.SwapTotal) * 100
+		swapPercent = percent(stats.SwapUsed, static.SwapTotal)
 	}
 
 	// CPU per-core stats
@@ -178,8 +195,8 @@ func BuildSnapshot(
 		})
 	}
 
-	// Full process list sorted by CPU
 	procList := buildProcessEntries(procs)
+	health := buildHealth(static, stats, procList)
 
 	return Snapshot{
 		Timestamp: time.Now(),
@@ -205,10 +222,10 @@ func BuildSnapshot(
 			Total:       static.MemTotal,
 			Used:        stats.MemUsed,
 			Available:   avail,
-			Percent:     math.Round(memPercent*10) / 10,
+			Percent:     memPercent,
 			SwapTotal:   static.SwapTotal,
 			SwapUsed:    stats.SwapUsed,
-			SwapPercent: math.Round(swapPercent*10) / 10,
+			SwapPercent: swapPercent,
 		},
 		Disk: DiskInfo{
 			Filesystems: buildFilesystems(static, stats),
@@ -230,6 +247,7 @@ func BuildSnapshot(
 			Total: int(stats.ProcessCount),
 			List:  procList,
 		},
+		Health: health,
 	}
 }
 
@@ -242,17 +260,156 @@ func buildProcessEntries(procs []vminfo.ProcessInfo) []ProcessEntry {
 	entries := make([]ProcessEntry, len(items))
 	for i, p := range items {
 		entries[i] = ProcessEntry{
-			PID:        p.PID,
-			Name:       p.Name,
-			User:       p.User,
-			CPUPercent: math.Round(p.CPUPercent*10) / 10,
-			MemPercent: p.MemoryPercent,
-			RSS:        p.RSSBytes,
-			Status:     p.State,
-			Command:    p.Name,
+			PID:           p.PID,
+			PPID:          p.PPID,
+			Name:          p.Name,
+			User:          p.User,
+			CPUPercent:    math.Round(p.CPUPercent*10) / 10,
+			MemPercent:    p.MemoryPercent,
+			RSS:           p.RSSBytes,
+			Status:        p.State,
+			Command:       firstNonEmpty(p.Command, p.Name),
+			Threads:       p.Threads,
+			Nice:          p.Nice,
+			Uptime:        p.Uptime,
+			StartedAtUnix: p.StartedAtUnix,
 		}
 	}
 	return entries
+}
+
+func buildHealth(static vminfo.StaticInfo, stats vminfo.RuntimeStats, procs []ProcessEntry) HealthInfo {
+	warnings := make([]HealthWarning, 0, 4)
+	add := func(level, code, message string) {
+		warnings = append(warnings, HealthWarning{
+			Level:   level,
+			Code:    code,
+			Message: message,
+		})
+	}
+
+	if stats.CPU >= 90 {
+		add("critical", "cpu_high", fmt.Sprintf("CPU usage is %.1f%%", stats.CPU))
+	} else if stats.CPU >= 75 {
+		add("warning", "cpu_high", fmt.Sprintf("CPU usage is %.1f%%", stats.CPU))
+	}
+
+	cores := float64(static.CPUCores)
+	if cores <= 0 {
+		cores = float64(stats.CPUCount)
+	}
+	if cores > 0 {
+		loadRatio := stats.Load1 / cores
+		if loadRatio >= 1.5 {
+			add("critical", "load_high", fmt.Sprintf("1m load %.2f is %.1fx CPU cores", stats.Load1, loadRatio))
+		} else if loadRatio >= 1.0 {
+			add("warning", "load_high", fmt.Sprintf("1m load %.2f is %.1fx CPU cores", stats.Load1, loadRatio))
+		}
+	}
+
+	memPercent := percent(stats.MemUsed, static.MemTotal)
+	if memPercent >= 90 {
+		add("critical", "memory_high", fmt.Sprintf("memory usage is %.1f%%", memPercent))
+	} else if memPercent >= 80 {
+		add("warning", "memory_high", fmt.Sprintf("memory usage is %.1f%%", memPercent))
+	}
+
+	swapPercent := percent(stats.SwapUsed, static.SwapTotal)
+	if swapPercent >= 50 {
+		add("warning", "swap_high", fmt.Sprintf("swap usage is %.1f%%", swapPercent))
+	}
+
+	diskPercent := percent(stats.DiskUsed, static.DiskTotal)
+	if diskPercent >= 95 {
+		add("critical", "disk_high", fmt.Sprintf("disk usage is %.1f%%", diskPercent))
+	} else if diskPercent >= 85 {
+		add("warning", "disk_high", fmt.Sprintf("disk usage is %.1f%%", diskPercent))
+	}
+
+	for _, iface := range stats.Interfaces {
+		totalWarn := iface.RxErrors + iface.TxErrors + iface.RxDrops + iface.TxDrops
+		if totalWarn > 0 {
+			add("warning", "network_errors", fmt.Sprintf("%s has %d errors/drops", iface.Name, totalWarn))
+			break
+		}
+	}
+
+	for _, proc := range procs {
+		if proc.CPUPercent >= 90 {
+			add("warning", "process_cpu_high", fmt.Sprintf("process %s (%d) uses %.1f%% CPU", firstNonEmpty(proc.Name, proc.Command, "-"), proc.PID, proc.CPUPercent))
+			break
+		}
+	}
+
+	score := 100
+	for _, warning := range warnings {
+		if warning.Level == "critical" {
+			score -= 20
+			continue
+		}
+		score -= 10
+	}
+	if score < 0 {
+		score = 0
+	}
+	return HealthInfo{
+		Score:    score,
+		Warnings: warnings,
+	}
+}
+
+func buildHealthFromSnapshot(snap Snapshot) HealthInfo {
+	static := vminfo.StaticInfo{
+		CPUCores:  uint32(snap.System.Cores),
+		MemTotal:  snap.Memory.Total,
+		DiskTotal: firstFilesystemTotal(snap.Disk.Filesystems),
+		SwapTotal: snap.Memory.SwapTotal,
+	}
+	stats := vminfo.RuntimeStats{
+		CPU:        snap.CPU.TotalPercent,
+		CPUCount:   snap.System.Cores,
+		MemUsed:    snap.Memory.Used,
+		SwapUsed:   snap.Memory.SwapUsed,
+		DiskUsed:   firstFilesystemUsed(snap.Disk.Filesystems),
+		Load1:      snap.Load.Load1,
+		Interfaces: snapshotInterfaces(snap.Network.Interfaces),
+	}
+	return buildHealth(static, stats, snap.Processes.List)
+}
+
+func firstFilesystemTotal(filesystems []Filesystem) uint64 {
+	if len(filesystems) == 0 {
+		return 0
+	}
+	return filesystems[0].Total
+}
+
+func firstFilesystemUsed(filesystems []Filesystem) uint64 {
+	if len(filesystems) == 0 {
+		return 0
+	}
+	return filesystems[0].Used
+}
+
+func snapshotInterfaces(items []NetInterface) []vminfo.InterfaceIO {
+	out := make([]vminfo.InterfaceIO, 0, len(items))
+	for _, item := range items {
+		out = append(out, vminfo.InterfaceIO{
+			Name:     item.Name,
+			RxErrors: item.RxErrors,
+			TxErrors: item.TxErrors,
+			RxDrops:  item.RxDrops,
+			TxDrops:  item.TxDrops,
+		})
+	}
+	return out
+}
+
+func percent(used, total uint64) float64 {
+	if total == 0 {
+		return 0
+	}
+	return math.Round(float64(used)/float64(total)*1000) / 10
 }
 
 func buildFilesystems(static vminfo.StaticInfo, stats vminfo.RuntimeStats) []Filesystem {
@@ -276,6 +433,15 @@ func formatOS(s vminfo.StaticInfo) string {
 		os += " " + s.OSVersion
 	}
 	return os
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func formatUptime(seconds uint64) string {

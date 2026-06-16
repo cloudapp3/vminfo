@@ -353,6 +353,70 @@ header {
     color: var(--yellow);
 }
 
+/* --- Health Summary --- */
+.health-summary {
+    display: grid;
+    gap: 10px;
+}
+.health-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+.health-score {
+    width: 56px;
+    height: 56px;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    font-weight: bold;
+    background: #0f0f0f;
+}
+.health-title {
+    color: var(--text-primary);
+    font-weight: bold;
+}
+.health-subtitle,
+.health-ok {
+    color: var(--text-muted);
+}
+.health-warnings {
+    display: grid;
+    gap: 6px;
+}
+.health-warning {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 1px solid #2a2a2a;
+    border-radius: 4px;
+    background: #101010;
+}
+.health-warning.warning { color: var(--yellow); }
+.health-warning.critical { color: var(--red); }
+.health-level {
+    min-width: 70px;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+.health-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    color: var(--text-secondary);
+}
+.health-proc {
+    padding: 2px 6px;
+    border: 1px solid #242424;
+    border-radius: 999px;
+    background: #0f0f0f;
+}
+
 /* --- Process Table --- */
 .process-table { font-size: 13px; }
 .proc-controls { margin-left: auto; display: flex; gap: 8px; }
@@ -380,12 +444,24 @@ header {
 .col-rss  { width: 80px; text-align: right; }
 .col-user { width: 100px; }
 .col-status { width: 30px; text-align: center; }
+.col-age { width: 70px; text-align: right; }
+.col-command {
+    max-width: 520px;
+    color: var(--text-secondary);
+}
 .process-table td.col-pid  { color: var(--blue); text-align: right; }
 .process-table td.col-cpu  { text-align: right; }
 .process-table td.col-mem  { text-align: right; }
 .process-table td.col-rss  { text-align: right; color: var(--text-secondary); }
 .process-table td.col-user { color: var(--text-muted); }
 .process-table td.col-status { text-align: center; color: var(--text-muted); }
+.process-table td.col-age { text-align: right; color: var(--text-muted); }
+.process-table td.col-name,
+.process-table td.col-command {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .process-count {
     color: var(--text-muted);
     font-weight: normal;

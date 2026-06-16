@@ -62,3 +62,6 @@ skills/
 skills-lock.json
 /scripts/
 sh/
+# Optional Rust port workspace
+/vminfo-rs/
+/docs/rust-port.md

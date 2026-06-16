@@ -97,6 +97,7 @@ func readProcEntry(pid int32, systemUptime float64, memTotal uint64, users map[u
 	if uid, ok := readProcUID(pid); ok {
 		userName = lookupUser(uid, users)
 	}
+	command := firstNonEmptyString(readProcCommandLine(pid), stat.comm)
 
 	clkTck := float64(procClockTicks)
 	procUptimeSecs := systemUptime - float64(stat.starttime)/clkTck
@@ -115,11 +116,16 @@ func readProcEntry(pid int32, systemUptime float64, memTotal uint64, users map[u
 	if procUptimeSecs > 0 {
 		uptime = uint64(procUptimeSecs)
 	}
+	startedAtUnix := int64(0)
+	if systemUptime > 0 && procUptimeSecs > 0 {
+		startedAtUnix = time.Now().Add(-time.Duration(procUptimeSecs * float64(time.Second))).Unix()
+	}
 
 	return ProcessInfo{
 		PID:           pid,
 		PPID:          stat.ppid,
 		Name:          stat.comm,
+		Command:       command,
 		User:          userName,
 		State:         stat.state,
 		CPUPercent:    cpuPercent,
@@ -128,6 +134,7 @@ func readProcEntry(pid int32, systemUptime float64, memTotal uint64, users map[u
 		Threads:       stat.numThreads,
 		Nice:          stat.nice,
 		Uptime:        uptime,
+		StartedAtUnix: startedAtUnix,
 	}, true
 }
 
@@ -225,6 +232,30 @@ func readProcRSSBytes(pid int32) uint64 {
 		return 0
 	}
 	return pages * uint64(os.Getpagesize())
+}
+
+// readProcCommandLine parses /proc/<pid>/cmdline into a displayable command
+// line. Kernel threads and short-lived processes often have an empty or
+// unreadable cmdline; callers should fall back to comm in those cases.
+func readProcCommandLine(pid int32) string {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if err != nil {
+		return ""
+	}
+	data = bytes.TrimRight(data, "\x00")
+	if len(data) == 0 {
+		return ""
+	}
+	parts := bytes.Split(data, []byte{0})
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = bytes.TrimSpace(part)
+		if len(part) == 0 {
+			continue
+		}
+		values = append(values, string(part))
+	}
+	return strings.Join(values, " ")
 }
 
 // readProcUID parses /proc/<pid>/status for the real UID (Uid: line).
@@ -349,6 +380,16 @@ func lookupUser(uid uint32, cached map[uint32]string) string {
 		return resolved
 	}
 	return strconv.FormatUint(uint64(uid), 10)
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // nssUserCache memoizes os/user.LookupId results across listProcesses

@@ -32,10 +32,30 @@ import (
 
 var ErrUsage = errors.New("usage")
 
+// minPSWatchInterval bounds --watch polling so a typo like --interval 0 does
+// not turn into a tight loop that re-reads all of /proc on every iteration.
+const minPSWatchInterval = 500 * time.Millisecond
+
 type watchSnapshot struct {
 	CollectedAt time.Time           `json:"collected_at"`
 	Static      vminfo.StaticInfo   `json:"static"`
 	Stats       vminfo.RuntimeStats `json:"stats"`
+}
+
+type processWatchSnapshot struct {
+	CollectedAt time.Time            `json:"collected_at"`
+	Processes   []vminfo.ProcessInfo `json:"processes"`
+}
+
+type psOptions struct {
+	asJSON   bool
+	sortKey  string
+	filter   string
+	limit    int
+	tree     bool
+	watch    bool
+	interval time.Duration
+	count    int
 }
 
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -547,27 +567,90 @@ func runWatch(ctx context.Context, stdout, stderr io.Writer, args []string, tr *
 func runPS(ctx context.Context, stdout, stderr io.Writer, args []string, tr *i18n.Translator) error {
 	fs := flag.NewFlagSet("ps", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	var asJSON bool
-	var sortKey string
-	fs.BoolVar(&asJSON, "json", false, tr.T("write process list as JSON"))
-	fs.StringVar(&sortKey, "sort", "cpu", tr.T("sort key: cpu|mem|pid|name"))
+	opts := psOptions{
+		sortKey:  "cpu",
+		interval: vminfo.DefaultSampleInterval,
+	}
+	fs.BoolVar(&opts.asJSON, "json", false, tr.T("write process list as JSON"))
+	fs.StringVar(&opts.sortKey, "sort", "cpu", tr.T("sort key: cpu|mem|pid|name"))
+	fs.StringVar(&opts.filter, "filter", "", tr.T("filter processes by name, user, pid, or command"))
+	fs.IntVar(&opts.limit, "limit", 0, tr.T("maximum number of processes to show (0 means all)"))
+	fs.BoolVar(&opts.tree, "tree", false, tr.T("render process tree in text output"))
+	fs.BoolVar(&opts.watch, "watch", false, tr.T("refresh process list continuously"))
+	fs.DurationVar(&opts.interval, "interval", vminfo.DefaultSampleInterval, tr.T("refresh interval for ps --watch"))
+	fs.IntVar(&opts.count, "count", 0, tr.T("number of ps samples to emit with --watch (0 means infinite)"))
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
 		return err
 	}
-	if len(fs.Args()) != 0 {
-		return fmt.Errorf("%w: ps does not accept positional args", ErrUsage)
+	if len(fs.Args()) > 1 {
+		return fmt.Errorf("%w: ps accepts at most one filter term", ErrUsage)
 	}
+	if len(fs.Args()) == 1 {
+		if strings.TrimSpace(opts.filter) != "" {
+			return fmt.Errorf("%w: ps accepts either a positional filter or --filter, not both", ErrUsage)
+		}
+		opts.filter = fs.Args()[0]
+	}
+	if opts.limit < 0 {
+		return fmt.Errorf("%w: ps limit must be >= 0", ErrUsage)
+	}
+	if opts.count < 0 {
+		return fmt.Errorf("%w: ps count must be >= 0", ErrUsage)
+	}
+	if opts.interval < 0 {
+		return fmt.Errorf("%w: ps interval must be >= 0", ErrUsage)
+	}
+	if opts.watch && opts.interval < minPSWatchInterval {
+		return fmt.Errorf("%w: ps --watch interval must be >= %s", ErrUsage, minPSWatchInterval)
+	}
+	if opts.watch {
+		return runPSWatch(ctx, stdout, opts, tr)
+	}
+	return writePSSample(ctx, stdout, opts, tr, false)
+}
 
+func runPSWatch(ctx context.Context, stdout io.Writer, opts psOptions, tr *i18n.Translator) error {
+	for emitted := 0; opts.count == 0 || emitted < opts.count; emitted++ {
+		if emitted > 0 && !opts.asJSON {
+			if _, err := fmt.Fprintln(stdout); err != nil {
+				return err
+			}
+		}
+		if err := writePSSample(ctx, stdout, opts, tr, true); err != nil {
+			return err
+		}
+		if opts.count > 0 && emitted+1 >= opts.count {
+			break
+		}
+		if err := sleepContext(ctx, opts.interval); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writePSSample(ctx context.Context, stdout io.Writer, opts psOptions, tr *i18n.Translator, watch bool) error {
 	items, err := vminfo.ListProcesses(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list processes: %w", err)
 	}
-	sortProcesses(items, sortKey)
-	if asJSON {
+	if opts.tree && !opts.asJSON {
+		return writeProcessTree(stdout, items, opts.filter, opts.limit, tr)
+	}
+	items = filterProcesses(items, opts.filter)
+	sortProcesses(items, opts.sortKey)
+	items = limitProcesses(items, opts.limit)
+	if opts.asJSON {
 		encoder := json.NewEncoder(stdout)
+		if watch {
+			return encoder.Encode(processWatchSnapshot{
+				CollectedAt: time.Now(),
+				Processes:   items,
+			})
+		}
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(items)
 	}
@@ -648,13 +731,13 @@ func writeWatchSnapshot(w io.Writer, collectedAt time.Time, staticInfo vminfo.St
 
 func writeProcesses(w io.Writer, items []vminfo.ProcessInfo, tr *i18n.Translator) error {
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
-	if _, err := fmt.Fprintln(tw, tr.T("PID")+"\t"+tr.T("PPID")+"\t"+tr.T("CPU%")+"\t"+tr.T("MEM%")+"\t"+tr.T("RSS")+"\t"+tr.T("USER")+"\t"+tr.T("STATE")+"\t"+tr.T("NAME")); err != nil {
+	if _, err := fmt.Fprintln(tw, tr.T("PID")+"\t"+tr.T("PPID")+"\t"+tr.T("CPU%")+"\t"+tr.T("MEM%")+"\t"+tr.T("RSS")+"\t"+tr.T("USER")+"\t"+tr.T("STATE")+"\t"+tr.T("AGE")+"\t"+tr.T("COMMAND")); err != nil {
 		return err
 	}
 	for _, item := range items {
 		if _, err := fmt.Fprintf(
 			tw,
-			"%d\t%d\t%.1f\t%.1f\t%s\t%s\t%s\t%s\n",
+			"%d\t%d\t%.1f\t%.1f\t%s\t%s\t%s\t%s\t%s\n",
 			item.PID,
 			item.PPID,
 			item.CPUPercent,
@@ -662,12 +745,182 @@ func writeProcesses(w io.Writer, items []vminfo.ProcessInfo, tr *i18n.Translator
 			formatBytes(item.RSSBytes),
 			firstNonEmpty(item.User, "-"),
 			firstNonEmpty(item.State, "-"),
-			firstNonEmpty(item.Name, "-"),
+			formatUptime(item.Uptime),
+			firstNonEmpty(item.Command, item.Name, "-"),
 		); err != nil {
 			return err
 		}
 	}
 	return tw.Flush()
+}
+
+func writeProcessTree(w io.Writer, items []vminfo.ProcessInfo, filter string, limit int, tr *i18n.Translator) error {
+	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+	if _, err := fmt.Fprintln(tw, tr.T("PID")+"\t"+tr.T("PPID")+"\t"+tr.T("CPU%")+"\t"+tr.T("MEM%")+"\t"+tr.T("RSS")+"\t"+tr.T("USER")+"\t"+tr.T("STATE")+"\t"+tr.T("AGE")+"\t"+tr.T("COMMAND")); err != nil {
+		return err
+	}
+	for _, row := range processTreeRows(items, filter, limit) {
+		item := row.item
+		if _, err := fmt.Fprintf(
+			tw,
+			"%d\t%d\t%.1f\t%.1f\t%s\t%s\t%s\t%s\t%s%s\n",
+			item.PID,
+			item.PPID,
+			item.CPUPercent,
+			item.MemoryPercent,
+			formatBytes(item.RSSBytes),
+			firstNonEmpty(item.User, "-"),
+			firstNonEmpty(item.State, "-"),
+			formatUptime(item.Uptime),
+			strings.Repeat("  ", row.depth),
+			firstNonEmpty(item.Command, item.Name, "-"),
+		); err != nil {
+			return err
+		}
+	}
+	return tw.Flush()
+}
+
+type processTreeRow struct {
+	item  vminfo.ProcessInfo
+	depth int
+}
+
+func processTreeRows(items []vminfo.ProcessInfo, filter string, limit int) []processTreeRow {
+	if len(items) == 0 {
+		return []processTreeRow{}
+	}
+	filter = strings.TrimSpace(filter)
+	lookup := make(map[int32]vminfo.ProcessInfo, len(items))
+	allChildren := make(map[int32][]vminfo.ProcessInfo, len(items))
+	for _, item := range items {
+		lookup[item.PID] = item
+		if item.PPID != 0 {
+			allChildren[item.PPID] = append(allChildren[item.PPID], item)
+		}
+	}
+
+	allowed := make(map[int32]bool, len(items))
+	if filter == "" {
+		for _, item := range items {
+			allowed[item.PID] = true
+		}
+	} else {
+		// A matched node keeps its ancestors (to show where it sits in the
+		// tree) and its descendants (to show its subtree). Both walks carry a
+		// visited set so malformed or cyclic PPID data cannot loop forever.
+		var markUp, markDown func(int32)
+		seenUp := make(map[int32]bool)
+		markUp = func(pid int32) {
+			for pid != 0 && !seenUp[pid] {
+				seenUp[pid] = true
+				allowed[pid] = true
+				parent, ok := lookup[pid]
+				if !ok {
+					break
+				}
+				pid = parent.PPID
+			}
+		}
+		seenDown := make(map[int32]bool)
+		markDown = func(pid int32) {
+			if seenDown[pid] {
+				return
+			}
+			seenDown[pid] = true
+			allowed[pid] = true
+			for _, child := range allChildren[pid] {
+				markDown(child.PID)
+			}
+		}
+		for _, item := range items {
+			if processMatchesFilter(item, filter) {
+				markUp(item.PID)
+				markDown(item.PID)
+			}
+		}
+	}
+
+	children := make(map[int32][]vminfo.ProcessInfo)
+	roots := make([]vminfo.ProcessInfo, 0, len(items))
+	for _, item := range items {
+		if !allowed[item.PID] {
+			continue
+		}
+		if item.PPID == 0 || !allowed[item.PPID] {
+			roots = append(roots, item)
+			continue
+		}
+		children[item.PPID] = append(children[item.PPID], item)
+	}
+	sortTreeSiblings(roots)
+	for parent := range children {
+		sortTreeSiblings(children[parent])
+	}
+
+	rows := make([]processTreeRow, 0, len(items))
+	var walk func(vminfo.ProcessInfo, int)
+	walk = func(item vminfo.ProcessInfo, depth int) {
+		if limit > 0 && len(rows) >= limit {
+			return
+		}
+		rows = append(rows, processTreeRow{item: item, depth: depth})
+		for _, child := range children[item.PID] {
+			walk(child, depth+1)
+		}
+	}
+	for _, root := range roots {
+		walk(root, 0)
+	}
+	return rows
+}
+
+func sortTreeSiblings(items []vminfo.ProcessInfo) {
+	slices.SortFunc(items, func(a, b vminfo.ProcessInfo) int {
+		return cmp.Compare(a.PID, b.PID)
+	})
+}
+
+func filterProcesses(items []vminfo.ProcessInfo, filter string) []vminfo.ProcessInfo {
+	filter = strings.TrimSpace(filter)
+	if filter == "" {
+		return items
+	}
+	filtered := make([]vminfo.ProcessInfo, 0, len(items))
+	for _, item := range items {
+		if processMatchesFilter(item, filter) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func processMatchesFilter(item vminfo.ProcessInfo, filter string) bool {
+	query := strings.ToLower(strings.TrimSpace(filter))
+	if query == "" {
+		return true
+	}
+	fields := []string{
+		strconv.FormatInt(int64(item.PID), 10),
+		strconv.FormatInt(int64(item.PPID), 10),
+		item.Name,
+		item.Command,
+		item.User,
+		item.State,
+	}
+	for _, field := range fields {
+		if strings.Contains(strings.ToLower(field), query) {
+			return true
+		}
+	}
+	return false
+}
+
+func limitProcesses(items []vminfo.ProcessInfo, limit int) []vminfo.ProcessInfo {
+	if limit <= 0 || limit >= len(items) {
+		return items
+	}
+	return items[:limit]
 }
 
 func sortProcesses(items []vminfo.ProcessInfo, sortKey string) {
@@ -697,6 +950,20 @@ func sortProcesses(items []vminfo.ProcessInfo, sortKey string) {
 	})
 }
 
+func sleepContext(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 func helpText(tr *i18n.Translator) string {
 	return strings.Join([]string{
 		tr.T("Usage:"),
@@ -711,6 +978,9 @@ func helpText(tr *i18n.Translator) string {
 		"  vminfo watch           " + tr.T("stream runtime snapshots"),
 		"  vminfo watch --json    " + tr.T("stream snapshots as JSON lines"),
 		"  vminfo ps              " + tr.T("list local processes"),
+		"  vminfo ps nginx        " + tr.T("filter local processes"),
+		"  vminfo ps --tree       " + tr.T("show process tree"),
+		"  vminfo ps --watch      " + tr.T("refresh process list continuously"),
 		"  vminfo ps --json       " + tr.T("list local processes as JSON"),
 		"  vminfo kill <pid>      " + tr.T("send SIGTERM on Linux"),
 		"  vminfo update          " + tr.T("check for and install updates"),

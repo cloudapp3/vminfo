@@ -17,6 +17,7 @@
         cpuStats: document.getElementById('cpu-stats'),
         networkSummary: document.getElementById('network-summary'),
         networkInterfaces: document.getElementById('network-interfaces'),
+        healthSummary: document.getElementById('health-summary'),
         procCount: document.getElementById('proc-count'),
         procTbody: document.getElementById('proc-tbody'),
         procFilter: document.getElementById('proc-filter'),
@@ -52,6 +53,7 @@
         renderDiskIO(snap.disk);
         renderResources(snap);
         renderNetwork(snap);
+        renderHealth(snap);
         renderProcesses(snap.processes);
     }
 
@@ -243,6 +245,51 @@
             '</table>';
     }
 
+    // --- Health Summary ---
+    function renderHealth(snap) {
+        var health = snap.health || { score: 100, warnings: [] };
+        var warnings = health.warnings || [];
+        var score = typeof health.score === 'number' ? health.score : 100;
+        var scoreColor = score >= 85 ? '#00ff87' : (score >= 65 ? '#ffd700' : '#ff5555');
+        var topProcesses = ((snap.processes && snap.processes.list) || []).slice(0, 5);
+
+        var html =
+            '<div class="health-head">' +
+                '<div class="health-score" style="color:' + scoreColor + '">' + score + '</div>' +
+                '<div><div class="health-title">Host health score</div>' +
+                '<div class="health-subtitle">' + warnings.length + ' active warning' + (warnings.length === 1 ? '' : 's') + '</div></div>' +
+            '</div>';
+
+        if (warnings.length === 0) {
+            html += '<div class="health-ok">No immediate CPU, memory, disk, network, or process pressure detected.</div>';
+        } else {
+            html += '<div class="health-warnings">';
+            for (var i = 0; i < Math.min(warnings.length, 5); i++) {
+                var w = warnings[i];
+                var cls = w.level === 'critical' ? 'critical' : 'warning';
+                html += '<div class="health-warning ' + cls + '">' +
+                    '<span class="health-level">' + escapeHtml(String(w.level || 'warning')).toUpperCase() + '</span>' +
+                    '<span>' + escapeHtml(String(w.message || w.code || 'warning')) + '</span>' +
+                    '</div>';
+            }
+            html += '</div>';
+        }
+
+        if (topProcesses.length > 0) {
+            html += '<div class="health-top"><span class="net-label">Top CPU</span>';
+            for (var j = 0; j < topProcesses.length; j++) {
+                var p = topProcesses[j];
+                html += '<span class="health-proc">' +
+                    escapeHtml(String(p.name || p.command || p.pid)) +
+                    ' <span style="color:' + thresholdColor(p.cpu_percent || 0) + '">' +
+                    Number(p.cpu_percent || 0).toFixed(1) + '%</span></span>';
+            }
+            html += '</div>';
+        }
+
+        dom.healthSummary.innerHTML = html;
+    }
+
     // --- Processes ---
     function renderProcesses(procs) {
         var totalCount = procs.total;
@@ -252,9 +299,12 @@
             var filtered = [];
             for (var i = 0; i < list.length; i++) {
                 var p = list[i];
-                if (p.name.toLowerCase().indexOf(state.procFilter) !== -1 ||
-                    p.user.toLowerCase().indexOf(state.procFilter) !== -1 ||
-                    String(p.pid).indexOf(state.procFilter) !== -1) {
+                if (String(p.name || '').toLowerCase().indexOf(state.procFilter) !== -1 ||
+                    String(p.command || '').toLowerCase().indexOf(state.procFilter) !== -1 ||
+                    String(p.user || '').toLowerCase().indexOf(state.procFilter) !== -1 ||
+                    String(p.pid).indexOf(state.procFilter) !== -1 ||
+                    String(p.ppid || '').indexOf(state.procFilter) !== -1 ||
+                    String(p.status || '').toLowerCase().indexOf(state.procFilter) !== -1) {
                     filtered.push(p);
                 }
             }
@@ -278,14 +328,17 @@
             var p = list[i];
             var cpuColor = thresholdColor(p.cpu_percent);
             var memColor = thresholdColor(p.mem_percent);
+            var command = p.command || p.name || '';
             html += '<tr>' +
                 '<td class="col-pid">' + p.pid + '</td>' +
                 '<td class="col-cpu" style="color:' + cpuColor + '">' + p.cpu_percent.toFixed(1) + '</td>' +
                 '<td class="col-mem" style="color:' + memColor + '">' + p.mem_percent.toFixed(1) + '</td>' +
                 '<td class="col-rss">' + formatBytes(p.rss) + '</td>' +
-                '<td class="col-user">' + escapeHtml(p.user) + '</td>' +
-                '<td class="col-status">' + p.status + '</td>' +
-                '<td class="col-name">' + escapeHtml(p.name) + '</td>' +
+                '<td class="col-user">' + escapeHtml(p.user || '—') + '</td>' +
+                '<td class="col-status">' + escapeHtml(p.status || '—') + '</td>' +
+                '<td class="col-age">' + formatDuration(p.uptime || 0) + '</td>' +
+                '<td class="col-name" title="' + escapeHtml(command) + '">' + escapeHtml(p.name || '—') + '</td>' +
+                '<td class="col-command" title="' + escapeHtml(command) + '">' + escapeHtml(command || '—') + '</td>' +
                 '</tr>';
         }
         dom.procTbody.innerHTML = html;
@@ -336,6 +389,19 @@
 
     function totalErrDrops(iface) {
         return (iface.rx_errors || 0) + (iface.tx_errors || 0) + (iface.rx_drops || 0) + (iface.tx_drops || 0);
+    }
+
+    function formatDuration(seconds) {
+        seconds = Math.max(0, Number(seconds || 0));
+        var days = Math.floor(seconds / 86400);
+        seconds -= days * 86400;
+        var hours = Math.floor(seconds / 3600);
+        seconds -= hours * 3600;
+        var minutes = Math.floor(seconds / 60);
+        if (days > 0) return days + 'd ' + hours + 'h';
+        if (hours > 0) return hours + 'h ' + minutes + 'm';
+        if (minutes > 0) return minutes + 'm';
+        return Math.floor(seconds) + 's';
     }
 
     function renderLoadValue(load, cores) {
