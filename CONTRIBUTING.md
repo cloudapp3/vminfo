@@ -33,7 +33,7 @@ Thanks for helping improve vminfo. Bug reports, feature ideas, documentation imp
 - `ps` / `kill` are Linux-only; non-Linux implementations should keep unsupported stubs
 - Keep CLI JSON output compatible unless a breaking change is explicitly intended
 - Keep `github.com/cloudapp3/vminfo` reusable as a public Go library
-- If command behavior or exported APIs change, update tests, `README.md`, and relevant docs under `docs/`
+- If command behavior or exported APIs change, update tests, `README.md`, and the documentation site in `cloudapp3/vmdocs`
 
 ## Local development
 

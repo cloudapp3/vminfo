@@ -6,9 +6,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/cloudapp3/vminfo.svg)](https://pkg.go.dev/github.com/cloudapp3/vminfo)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Documentation: [Website](docs/) · [中文说明](docs/zh/) · [HTTP API](docs/api.md)
-
-中文说明：[docs/README.zh-CN.md](docs/README.zh-CN.md)
+Documentation: [Website](https://vminfo.bestcheapvps.org) · [中文说明](https://vminfo.bestcheapvps.org/zh/) · [HTTP API](https://vminfo.bestcheapvps.org/api) · [Docs source](https://github.com/cloudapp3/vmdocs)
 
 [Quick start](#quick-start) · [Preview](#preview) · [Join Telegram](https://t.me/VMPulse) · [Open an issue](https://github.com/cloudapp3/vminfo/issues/new) · [Contributing](#contributing)
 
@@ -58,17 +56,17 @@ Use vminfo when you need to:
 
 ## Preview
 
-![vminfo preview](docs/assets/tui-demo.gif)
+![vminfo preview](https://raw.githubusercontent.com/cloudapp3/vmdocs/main/docs/assets/tui-demo.gif)
 
 > Screens may vary slightly by terminal width, font, and theme.
 
 | TUI overview | Web dashboard |
 | --- | --- |
-| ![vminfo overview refreshed](docs/assets/tui-overview-refreshed.png) | ![vminfo web dashboard](docs/assets/web-dashboard.png) |
+| ![vminfo overview refreshed](https://raw.githubusercontent.com/cloudapp3/vmdocs/main/docs/assets/tui-overview-refreshed.png) | ![vminfo web dashboard](https://raw.githubusercontent.com/cloudapp3/vmdocs/main/docs/assets/web-dashboard.png) |
 
 | Processes | Help |
 | --- | --- |
-| ![vminfo processes](docs/assets/tui-processes.png) | ![vminfo help](docs/assets/tui-help.png) |
+| ![vminfo processes](https://raw.githubusercontent.com/cloudapp3/vmdocs/main/docs/assets/tui-processes.png) | ![vminfo help](https://raw.githubusercontent.com/cloudapp3/vmdocs/main/docs/assets/tui-help.png) |
 
 ## What it does
 
@@ -316,11 +314,12 @@ go run ./cmd/vminfo summary --json
 
 ## Documentation
 
-- [docs/README.zh-CN.md](docs/README.zh-CN.md)
-- [docs/api.md](docs/api.md)
-- [docs/changelog.md](docs/changelog.md)
-- [docs/roadmap/feature-benchmark.md](docs/roadmap/feature-benchmark.md)
-- [docs/guide/deployment.md](docs/guide/deployment.md)
+- [Documentation website](https://vminfo.bestcheapvps.org)
+- [Chinese docs](https://vminfo.bestcheapvps.org/zh/)
+- [HTTP API](https://vminfo.bestcheapvps.org/api)
+- [Changelog](https://vminfo.bestcheapvps.org/changelog)
+- [Roadmap](https://vminfo.bestcheapvps.org/roadmap/feature-benchmark)
+- [Docs source repository](https://github.com/cloudapp3/vmdocs)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## License
