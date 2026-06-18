@@ -56,17 +56,17 @@ Use vminfo when you need to:
 
 ## Preview
 
-![vminfo preview](https://raw.githubusercontent.com/cloudapp3/vmdocs/main/docs/assets/tui-demo.gif)
+![vminfo preview](https://raw.githubusercontent.com/cloudapp3/vmdocs/main/sites/vminfo/docs/assets/tui-demo.gif)
 
 > Screens may vary slightly by terminal width, font, and theme.
 
 | TUI overview | Web dashboard |
 | --- | --- |
-| ![vminfo overview refreshed](https://raw.githubusercontent.com/cloudapp3/vmdocs/main/docs/assets/tui-overview-refreshed.png) | ![vminfo web dashboard](https://raw.githubusercontent.com/cloudapp3/vmdocs/main/docs/assets/web-dashboard.png) |
+| ![vminfo overview refreshed](https://raw.githubusercontent.com/cloudapp3/vmdocs/main/sites/vminfo/docs/assets/tui-overview-refreshed.png) | ![vminfo web dashboard](https://raw.githubusercontent.com/cloudapp3/vmdocs/main/sites/vminfo/docs/assets/web-dashboard.png) |
 
 | Processes | Help |
 | --- | --- |
-| ![vminfo processes](https://raw.githubusercontent.com/cloudapp3/vmdocs/main/docs/assets/tui-processes.png) | ![vminfo help](https://raw.githubusercontent.com/cloudapp3/vmdocs/main/docs/assets/tui-help.png) |
+| ![vminfo processes](https://raw.githubusercontent.com/cloudapp3/vmdocs/main/sites/vminfo/docs/assets/tui-processes.png) | ![vminfo help](https://raw.githubusercontent.com/cloudapp3/vmdocs/main/sites/vminfo/docs/assets/tui-help.png) |
 
 ## What it does
 
