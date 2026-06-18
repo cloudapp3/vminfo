@@ -25,7 +25,7 @@ corepack enable && pnpm install --frozen-lockfile && pnpm docs:build
 
 ## Custom domain
 
-- Use a docs subdomain such as `docs.example.com`
+- Use a docs subdomain such as `vminfo.bestcheapvps.org`
 - Add the custom domain inside the Cloudflare Pages project first
 - Then configure DNS as Cloudflare instructs
 - Do not create only a manual CNAME without attaching the Pages project

@@ -32,7 +32,7 @@ export default defineConfig({
   ignoreDeadLinks: false,
 
   sitemap: {
-    hostname: 'https://docs.example.com',
+    hostname: 'https://vminfo.bestcheapvps.org',
   },
 
   head: [
