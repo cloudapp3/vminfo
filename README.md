@@ -6,6 +6,8 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/cloudapp3/vminfo.svg)](https://pkg.go.dev/github.com/cloudapp3/vminfo)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+Documentation: [Website](docs/) · [中文说明](docs/zh/) · [HTTP API](docs/api.md)
+
 中文说明：[docs/README.zh-CN.md](docs/README.zh-CN.md)
 
 [Quick start](#quick-start) · [Preview](#preview) · [Join Telegram](https://t.me/VMPulse) · [Open an issue](https://github.com/cloudapp3/vminfo/issues/new) · [Contributing](#contributing)
@@ -316,9 +318,10 @@ go run ./cmd/vminfo summary --json
 
 - [docs/README.zh-CN.md](docs/README.zh-CN.md)
 - [docs/api.md](docs/api.md)
-- [docs/feature-benchmark.md](docs/feature-benchmark.md)
+- [docs/changelog.md](docs/changelog.md)
+- [docs/roadmap/feature-benchmark.md](docs/roadmap/feature-benchmark.md)
+- [docs/guide/deployment.md](docs/guide/deployment.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
-- [docs/CHANGELOG.md](docs/CHANGELOG.md)
 
 ## License
 

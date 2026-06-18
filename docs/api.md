@@ -1,18 +1,28 @@
-# vminfo HTTP API
+---
+title: HTTP API
+description: Read-only HTTP API and WebSocket endpoints exposed by the vminfo web dashboard.
+---
+
+# HTTP API
 
 `vminfo --web` starts a lightweight, read-only HTTP API and dashboard.
 
-Default address:
+## Start the server
 
 ```bash
 vminfo --web
-# http://127.0.0.1:20021
+```
+
+Default address:
+
+```text
+http://127.0.0.1:20021
 ```
 
 Custom address:
 
 ```bash
-vminfo --web --bind 0.0.0.0 --port 8080
+vminfo --web --bind 0.0.0.0 --port 8080 --interval 1s
 ```
 
 ## Authentication
@@ -26,18 +36,19 @@ vminfo --web --token
 vminfo --web --token my-secret
 ```
 
-- `/healthz` remains public for local health probes.
-- `/`, `/api/v1/*`, and `/ws` require either `?token=...` or the auth cookie set after a successful token visit.
-- Token-protected mode does not expose permissive `Access-Control-Allow-Origin: *`.
-- WebSocket requests must use the same browser origin as the dashboard host.
+- bare `--token` auto-generates a URL-safe token
+- `--token my-secret` uses a fixed token
+- the first successful `/?token=...` visit sets a cookie for later requests
+- `/healthz` remains public
+- `/`, `/api/v1/*`, and `/ws` require the token or auth cookie
+- token-protected mode does not expose permissive `Access-Control-Allow-Origin: *`
+- WebSocket requests must use the same browser origin as the dashboard host
 
 ## Endpoints
 
 ### `GET /healthz`
 
 Public health check for the web process.
-
-Example response:
 
 ```json
 {
@@ -49,8 +60,6 @@ Example response:
 ### `GET /api/v1/snapshot`
 
 Returns the current full dashboard snapshot.
-
-Top-level shape:
 
 ```json
 {
@@ -76,11 +85,11 @@ Returns memory and swap totals, usage, availability, and percentages.
 
 ### `GET /api/v1/disk`
 
-Returns aggregate filesystem usage and disk I/O rates.
+Returns filesystem usage and disk I/O rates.
 
 ### `GET /api/v1/network`
 
-Returns total network throughput, TCP/UDP connection counts, and interface counters.
+Returns network throughput, TCP/UDP connection counts, and interface counters.
 
 ### `GET /api/v1/processes`
 
@@ -90,10 +99,10 @@ Supported query parameters:
 
 | Parameter | Description |
 | --- | --- |
-| `filter` | Case-insensitive match against PID, PPID, name, command, user, or state. |
-| `q` | Alias for `filter`. |
-| `sort` | `cpu`, `mem`, `pid`, or `name`. Defaults to `cpu`. |
-| `limit` | Maximum number of returned rows. `0` or omitted means no limit. |
+| `filter` | Case-insensitive match against PID, PPID, name, command, user, or state |
+| `q` | Alias for `filter` |
+| `sort` | `cpu`, `mem`, `pid`, or `name`; defaults to `cpu` |
+| `limit` | Maximum number of returned rows; `0` or omitted means no limit |
 
 Example:
 
@@ -126,17 +135,13 @@ Response shape:
 }
 ```
 
-`total` is the total process count before API-side filtering and limiting; `list` is the returned page after filtering, sorting, and limiting.
-
 ### `GET /api/v1/system`
 
 Returns host metadata, OS/kernel/arch, CPU model/core count, and uptime.
 
 ### `GET /api/v1/health`
 
-Returns the lightweight health score and warnings used by the dashboard Health Summary card.
-
-Example response:
+Returns the lightweight health score and warnings used by the dashboard.
 
 ```json
 {
@@ -151,18 +156,15 @@ Example response:
 }
 ```
 
-The score is intentionally simple and explainable:
-
-- starts at `100`
-- subtracts `10` for each warning
-- subtracts `20` for each critical warning
-- floors at `0`
-
 ### `GET /ws`
 
 WebSocket stream of full dashboard snapshots.
 
-- Sends the latest snapshot immediately after connection.
-- Streams refreshed snapshots as the collector updates.
-- In token-protected mode, the request must authenticate and pass same-origin checks.
+- sends the latest snapshot immediately after connection
+- streams refreshed snapshots as the collector updates
+- in token-protected mode, the request must authenticate and pass same-origin checks
 
+## See also
+
+- [Web dashboard guide](/guide/web-dashboard)
+- [Command reference](/commands/)
