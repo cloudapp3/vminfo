@@ -34,10 +34,13 @@ func TestBuildHealthReportsResourcePressure(t *testing.T) {
 	for _, warning := range health.Warnings {
 		codes[warning.Code] = true
 	}
-	for _, code := range []string{"cpu_high", "load_high", "memory_high", "swap_high", "disk_high", "network_errors", "process_cpu_high"} {
+	for _, code := range []string{"cpu_high", "load_high", "memory_high", "swap_high", "disk_high", "process_cpu_high"} {
 		if !codes[code] {
 			t.Fatalf("expected warning code %s in %+v", code, health.Warnings)
 		}
+	}
+	if codes["network_errors"] {
+		t.Fatalf("did not expect cumulative network errors to affect health: %+v", health.Warnings)
 	}
 }
 

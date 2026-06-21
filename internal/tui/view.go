@@ -497,8 +497,6 @@ func (m Model) renderNetworkInterfaces() string {
 	grayDot := lipgloss.NewStyle().Foreground(CMuted).Render("○")
 	activeStyle := lipgloss.NewStyle().Foreground(CText)
 	idleStyle := lipgloss.NewStyle().Foreground(CMuted)
-	warn := lipgloss.NewStyle().Foreground(CWarn)
-
 	ifaceW := 12
 	ipW := 16
 	rxW := 13
@@ -535,8 +533,7 @@ func (m Model) renderNetworkInterfaces() string {
 	var foldedRx, foldedTx uint64
 	for _, iface := range sorted {
 		isActive := iface.RxSpeed > 0 || iface.TxSpeed > 0
-		hasWarn := totalErrDrops(iface) > 0
-		if !isActive && !hasWarn {
+		if !isActive {
 			idleTotal++
 			if idleTotal > maxIdleVisible && len(sorted) > maxIdleVisible+1 {
 				foldedCount++
@@ -566,13 +563,9 @@ func (m Model) renderNetworkInterfaces() string {
 
 		rxText := lipgloss.NewStyle().Foreground(CBrightGreen).Render("↓ " + padLeft(formatBytes(iface.RxSpeed)+"/s", rxW-2, false))
 		txText := lipgloss.NewStyle().Foreground(CPink).Render("↑ " + padLeft(formatBytes(iface.TxSpeed)+"/s", txW-2, false))
-		warnText := renderIfaceWarning(iface, compact)
 
 		if compact {
 			line := "  " + dot + " " + rowStyle.Render(padRight(name, ifaceW, false)) + ipStyle.Render(ipText) + " " + rxText + " " + txText
-			if warnText != "" {
-				line += " " + warn.Render(warnText)
-			}
 			lines = append(lines, line)
 			continue
 		}
@@ -592,9 +585,6 @@ func (m Model) renderNetworkInterfaces() string {
 			)
 		}
 		line := strings.Join(parts, "")
-		if warnText != "" {
-			line += "  " + warn.Render(warnText)
-		}
 		lines = append(lines, line)
 	}
 
@@ -618,11 +608,6 @@ func sortInterfaces(ifaces []vminfo.InterfaceIO) []vminfo.InterfaceIO {
 	sort.SliceStable(sorted, func(i, j int) bool {
 		aActive := sorted[i].RxSpeed > 0 || sorted[i].TxSpeed > 0
 		bActive := sorted[j].RxSpeed > 0 || sorted[j].TxSpeed > 0
-		aHighlight := aActive || totalErrDrops(sorted[i]) > 0
-		bHighlight := bActive || totalErrDrops(sorted[j]) > 0
-		if aHighlight != bHighlight {
-			return aHighlight
-		}
 		if aActive != bActive {
 			return aActive
 		}
@@ -668,22 +653,6 @@ func loadMiniBar(load float64, cores uint32) rune {
 	default:
 		return '▁'
 	}
-}
-
-func totalErrDrops(iface vminfo.InterfaceIO) uint64 {
-	return iface.RxErrors + iface.TxErrors + iface.RxDrops + iface.TxDrops
-}
-
-func renderIfaceWarning(iface vminfo.InterfaceIO, compact bool) string {
-	errs := iface.RxErrors + iface.TxErrors
-	drops := iface.RxDrops + iface.TxDrops
-	if errs == 0 && drops == 0 {
-		return ""
-	}
-	if compact {
-		return fmt.Sprintf("⚠%d/%d", errs, drops)
-	}
-	return fmt.Sprintf("⚠ %d errs %d drops", errs, drops)
 }
 
 func padRight(value string, width int, styled bool) string {

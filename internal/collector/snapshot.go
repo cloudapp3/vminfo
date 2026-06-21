@@ -326,14 +326,6 @@ func buildHealth(static vminfo.StaticInfo, stats vminfo.RuntimeStats, procs []Pr
 		add("warning", "disk_high", fmt.Sprintf("disk usage is %.1f%%", diskPercent))
 	}
 
-	for _, iface := range stats.Interfaces {
-		totalWarn := iface.RxErrors + iface.TxErrors + iface.RxDrops + iface.TxDrops
-		if totalWarn > 0 {
-			add("warning", "network_errors", fmt.Sprintf("%s has %d errors/drops", iface.Name, totalWarn))
-			break
-		}
-	}
-
 	for _, proc := range procs {
 		if proc.CPUPercent >= 90 {
 			add("warning", "process_cpu_high", fmt.Sprintf("process %s (%d) uses %.1f%% CPU", firstNonEmpty(proc.Name, proc.Command, "-"), proc.PID, proc.CPUPercent))

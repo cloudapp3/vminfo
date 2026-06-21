@@ -316,7 +316,6 @@ header {
 .network-table .col-rx,
 .network-table .col-tx { width: 120px; }
 .network-table .col-total { width: 110px; }
-.network-table .col-warn { width: 150px; color: var(--yellow); }
 .network-row.idle {
     color: var(--text-muted);
 }
@@ -348,9 +347,6 @@ header {
 }
 .ip-private {
     color: var(--text-muted);
-}
-.iface-warn {
-    color: var(--yellow);
 }
 
 /* --- Health Summary --- */
@@ -504,8 +500,7 @@ header {
     .network-table {
         min-width: 520px;
     }
-    .network-table .col-total,
-    .network-table .col-warn {
+    .network-table .col-total {
         display: none;
     }
     .network-table .col-iface { width: 120px; }

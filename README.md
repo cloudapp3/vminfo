@@ -83,15 +83,15 @@ vminfo gives you instant visibility into any host:
 - **Web dashboard** — browser-based UI with REST and WebSocket endpoints (`vminfo --web`)
 - **Go library** — import `github.com/cloudapp3/vminfo` for collection, or `github.com/cloudapp3/vminfo/tui` to embed the interactive terminal UI
 
-Collected metrics: CPU (per-core), memory, swap, disk, disk I/O, network, load, TCP/UDP counts, network interface totals/errors/drops, process list, temperatures, uptime, and host metadata.
+Collected metrics: CPU (per-core), memory, swap, disk, disk I/O, network, load, TCP/UDP counts, network interface totals, process list, temperatures, uptime, and host metadata.
 
 ## Network & Load panel
 
 - **Load-aware coloring** — 1m / 5m / 15m load values are colored by `load / CPU cores`, with mini bars in wide layouts
 - **Traffic split** — total throughput is separated from the per-interface table for faster scanning
-- **Interface prioritization** — active interfaces and warning interfaces sort before idle bridges / veth devices
-- **Noise reduction** — idle interfaces fold on narrow layouts, while public/private IPs and errors/drops stay visually distinct
-- **Web parity** — the web dashboard mirrors the same network semantics: totals, sorting, IP styling, and interface warnings
+- **Interface prioritization** — active interfaces sort before idle bridges / veth devices
+- **Noise reduction** — idle interfaces fold on narrow layouts, while public/private IPs stay visually distinct
+- **Web parity** — the web dashboard mirrors the same network semantics: totals, sorting, and IP styling
 
 ## Commands
 

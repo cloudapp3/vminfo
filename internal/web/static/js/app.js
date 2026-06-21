@@ -191,9 +191,8 @@
         for (var i = 0; i < interfaces.length; i++) {
             var iface = interfaces[i];
             var isActive = iface.download_sec > 0 || iface.upload_sec > 0;
-            var totalWarn = totalErrDrops(iface);
 
-            if (!isActive && totalWarn === 0) {
+            if (!isActive) {
                 if (idleVisible >= maxIdleVisible && interfaces.length > maxIdleVisible + 1) {
                     foldedCount++;
                     foldedRx += iface.rx_bytes || 0;
@@ -205,9 +204,6 @@
 
             var ip = iface.ipv4 || '—';
             var ipClass = ip !== '—' && !isPrivateIP(ip) ? 'ip-public' : 'ip-private';
-            var warnHtml = totalWarn > 0
-                ? '<span class="iface-warn">⚠ ' + ((iface.rx_errors || 0) + (iface.tx_errors || 0)) + ' errs ' + ((iface.rx_drops || 0) + (iface.tx_drops || 0)) + ' drops</span>'
-                : '';
             var rowClass = isActive ? 'active' : 'idle';
 
             visibleRows += '<tr class="network-row ' + rowClass + '">' +
@@ -217,7 +213,6 @@
                 '<td class="col-tx net-up">&uarr; ' + formatBytesPerSec(iface.upload_sec || 0) + '</td>' +
                 '<td class="col-total col-total-rx">' + formatBytes(iface.rx_bytes || 0) + '</td>' +
                 '<td class="col-total col-total-tx">' + formatBytes(iface.tx_bytes || 0) + '</td>' +
-                '<td class="col-warn">' + warnHtml + '</td>' +
                 '</tr>';
         }
 
@@ -226,7 +221,6 @@
                 '<td class="col-iface" colspan="4"><span class="iface-dot idle">○</span><span class="iface-name">' + foldedCount + ' idle interfaces</span></td>' +
                 '<td class="col-total col-total-rx">' + formatBytes(foldedRx) + '</td>' +
                 '<td class="col-total col-total-tx">' + formatBytes(foldedTx) + '</td>' +
-                '<td class="col-warn"></td>' +
                 '</tr>';
         }
 
@@ -239,7 +233,6 @@
                     '<th class="col-tx">TX/s</th>' +
                     '<th class="col-total col-total-rx">TOTAL RX</th>' +
                     '<th class="col-total col-total-tx">TOTAL TX</th>' +
-                    '<th class="col-warn">WARN</th>' +
                 '</tr></thead>' +
                 '<tbody>' + visibleRows + '</tbody>' +
             '</table>';
@@ -354,9 +347,6 @@
         return items.slice().sort(function(a, b) {
             var aActive = (a.download_sec || 0) > 0 || (a.upload_sec || 0) > 0;
             var bActive = (b.download_sec || 0) > 0 || (b.upload_sec || 0) > 0;
-            var aHighlight = aActive || totalErrDrops(a) > 0;
-            var bHighlight = bActive || totalErrDrops(b) > 0;
-            if (aHighlight !== bHighlight) return aHighlight ? -1 : 1;
             if (aActive !== bActive) return aActive ? -1 : 1;
             var aPri = ifacePriority(a.name || '');
             var bPri = ifacePriority(b.name || '');
@@ -385,10 +375,6 @@
             /^127\./.test(ip) ||
             /^192\.168\./.test(ip) ||
             /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip);
-    }
-
-    function totalErrDrops(iface) {
-        return (iface.rx_errors || 0) + (iface.tx_errors || 0) + (iface.rx_drops || 0) + (iface.tx_drops || 0);
     }
 
     function formatDuration(seconds) {
