@@ -67,14 +67,19 @@ func (s *Server) Start() error {
 		Handler: handler,
 	}
 
-	// Start WS broadcast loop
-	go s.broadcastLoop(context.Background())
+	// Start WS broadcast loop for the lifetime of the HTTP server.
+	broadcastCtx, cancelBroadcast := context.WithCancel(context.Background())
+	defer cancelBroadcast()
+	go s.broadcastLoop(broadcastCtx)
 
 	return s.server.ListenAndServe()
 }
 
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.server == nil {
+		return nil
+	}
 	return s.server.Shutdown(ctx)
 }
 

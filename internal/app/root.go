@@ -222,14 +222,21 @@ func runWeb(ctx context.Context, stdout, stderr io.Writer, tr *i18n.Translator, 
 	// interface addresses instead of only the wildcard bind address.
 	snap := waitForCollectorSnapshot(ctx, col, 2*time.Second)
 
-	// Start web server
+	// Start web server and surface startup failures to the web-mode control flow.
 	srv := web.NewServer(addr, col, web.Options{AuthToken: authToken})
+	serverErrCh := make(chan error, 1)
 	go func() {
 		if err := srv.Start(); err != nil {
 			if errors.Is(err, http.ErrServerClosed) {
 				return
 			}
-			fmt.Fprintf(stderr, "web server error: %v\n", err)
+			select {
+			case serverErrCh <- err:
+			default:
+			}
+			if withTUI {
+				fmt.Fprintf(stderr, "web server error: %v\n", err)
+			}
 		}
 	}()
 
@@ -243,24 +250,42 @@ func runWeb(ctx context.Context, stdout, stderr io.Writer, tr *i18n.Translator, 
 		if !silent {
 			fmt.Fprintf(stdout, "Starting TUI alongside web dashboard...\n")
 		}
-		return vminfotui.Run(ctx, vminfotui.Options{
+		err := vminfotui.Run(ctx, vminfotui.Options{
 			Stdout: stdout,
 			Stdin:  os.Stdin,
 			Lang:   tr.Locale(),
 		})
+		if shutdownErr := shutdownWebServer(srv); shutdownErr != nil && err == nil {
+			err = shutdownErr
+		}
+		return err
 	}
 
-	// Web-only mode: block until signal
+	// Web-only mode: block until signal, context cancellation, or server startup failure.
 	if !silent {
 		fmt.Fprintf(stdout, "Press Ctrl+C to stop\n")
 	}
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	<-sigCh
+	signalCtx, stopSignals := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	defer stopSignals()
 
-	if !silent {
-		fmt.Fprintf(stdout, "\nShutting down...\n")
+	select {
+	case err := <-serverErrCh:
+		return fmt.Errorf("web server error: %w", err)
+	case <-signalCtx.Done():
+		if !silent {
+			fmt.Fprintf(stdout, "\nShutting down...\n")
+		}
+		if err := shutdownWebServer(srv); err != nil {
+			return err
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return nil
 	}
+}
+
+func shutdownWebServer(srv *web.Server) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)

@@ -1,9 +1,38 @@
 package app
 
 import (
+	"bytes"
+	"context"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/cloudapp3/vminfo/internal/i18n"
 )
+
+func TestRunWebReturnsServerStartError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runWeb(ctx, &stdout, &stderr, i18n.New("en"), "127.0.0.1:99999", 10*time.Millisecond, false, true, "", false)
+	}()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected server start error, got nil")
+		}
+		if !strings.Contains(err.Error(), "web server error") {
+			t.Fatalf("expected web server error, got %v", err)
+		}
+	case <-time.After(6 * time.Second):
+		t.Fatal("runWeb did not return after server start failure")
+	}
+}
 
 func TestResolveWebTokenBareFlag(t *testing.T) {
 	token, generated, err := resolveWebToken("", true)
