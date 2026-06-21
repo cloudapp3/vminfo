@@ -14,10 +14,10 @@ Documentation: [Website](https://vminfo.bestcheapvps.org) · [中文说明](http
 
 ```bash
 # 1. Install — one-line script (Linux/macOS)
-curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | sudo bash -s -- --dir /usr/local/bin
 
-# Or with sudo to install to /usr/local/bin
-curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | sudo bash
+# Or install without sudo to an auto-detected user directory
+curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash
 
 # 2. Run — interactive TUI
 vminfo
@@ -28,7 +28,7 @@ vminfo summary --json
 
 That's it. No config files, no daemons, no setup.
 
-The install script auto-selects a directory: `/usr/local/bin` → `~/.local/bin` → `~/bin`.
+The install script auto-selects a directory when `--dir` is not set: `/usr/local/bin` → `~/.local/bin` → `~/bin`.
 
 Other install options:
 
@@ -38,6 +38,12 @@ curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | 
 
 # Go source build
 go install github.com/cloudapp3/vminfo/cmd/vminfo@latest
+```
+
+If you install to a custom directory such as `/opt/bin`, make sure that directory is in your `PATH`, or symlink the binary into `/usr/local/bin`:
+
+```bash
+sudo ln -sf /opt/bin/vminfo /usr/local/bin/vminfo
 ```
 
 Need help, want to share feedback, or request a feature? Join the [VMPulse Telegram group](https://t.me/VMPulse) or [open an issue](https://github.com/cloudapp3/vminfo/issues/new).

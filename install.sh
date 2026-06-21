@@ -22,8 +22,8 @@ Options:
   -h, --help        Show this help message.
 
 Examples:
+  curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | sudo bash -s -- --dir /usr/local/bin
   curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash
-  curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | sudo bash
   curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | bash -s -- --version v0.1.0
 EOF
 }
@@ -39,6 +39,49 @@ die() {
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+path_has_dir() (
+  dir="$1"
+
+  while [ "$dir" != "/" ] && [ "${dir%/}" != "$dir" ]; do
+    dir="${dir%/}"
+  done
+  [ -n "$dir" ] || return 1
+
+  IFS=:
+  for path_dir in ${PATH:-}; do
+    while [ "$path_dir" != "/" ] && [ "${path_dir%/}" != "$path_dir" ]; do
+      path_dir="${path_dir%/}"
+    done
+    [ "$path_dir" = "$dir" ] && return 0
+  done
+
+  return 1
+)
+
+print_path_hint() {
+  local install_dir="$1"
+  local target_path="$2"
+
+  if path_has_dir "$install_dir"; then
+    log "Verify the installation with:"
+    log "  ${BINARY_NAME} version"
+    return
+  fi
+
+  log "Warning: ${install_dir} is not in your PATH, so running \"${BINARY_NAME}\" may fail."
+  log ""
+  log "You can run it directly with:"
+  log "  ${target_path} version"
+  log ""
+  if [ "$install_dir" != "/usr/local/bin" ]; then
+    log "To make \"${BINARY_NAME}\" available globally, either create a symlink:"
+    log "  sudo ln -sf ${target_path} /usr/local/bin/${BINARY_NAME}"
+    log ""
+  fi
+  log "Or add ${install_dir} to your shell PATH:"
+  log "  export PATH=\"${install_dir}:\$PATH\""
 }
 
 while [ "$#" -gt 0 ]; do
@@ -202,5 +245,4 @@ fi
 
 log "Installed ${BINARY_NAME} ${VERSION} to ${TARGET_PATH}"
 
-log "Verify the installation with:"
-log "  ${TARGET_PATH} version"
+print_path_hint "$INSTALL_DIR" "$TARGET_PATH"
