@@ -74,24 +74,31 @@ type DiskIO struct {
 }
 
 type NetworkInfo struct {
-	TotalDownloadSec uint64         `json:"total_download_sec"`
-	TotalUploadSec   uint64         `json:"total_upload_sec"`
-	TCPConns         uint32         `json:"tcp_connections"`
-	UDPConns         uint32         `json:"udp_connections"`
-	Interfaces       []NetInterface `json:"interfaces"`
+	TotalDownloadSec uint64            `json:"total_download_sec"`
+	TotalUploadSec   uint64            `json:"total_upload_sec"`
+	TCPConns         uint32            `json:"tcp_connections"`
+	TCPStates        map[string]uint32 `json:"tcp_states,omitempty"`
+	UDPConns         uint32            `json:"udp_connections"`
+	ConntrackCount   uint32            `json:"conntrack_count,omitempty"`
+	ConntrackMax     uint32            `json:"conntrack_max,omitempty"`
+	Interfaces       []NetInterface    `json:"interfaces"`
 }
 
 type NetInterface struct {
-	Name        string `json:"name"`
-	DownloadSec uint64 `json:"download_sec"`
-	UploadSec   uint64 `json:"upload_sec"`
-	IPv4        string `json:"ipv4,omitempty"`
-	RxBytes     uint64 `json:"rx_bytes,omitempty"`
-	TxBytes     uint64 `json:"tx_bytes,omitempty"`
-	RxErrors    uint64 `json:"rx_errors,omitempty"`
-	TxErrors    uint64 `json:"tx_errors,omitempty"`
-	RxDrops     uint64 `json:"rx_drops,omitempty"`
-	TxDrops     uint64 `json:"tx_drops,omitempty"`
+	Name        string  `json:"name"`
+	DownloadSec uint64  `json:"download_sec"`
+	UploadSec   uint64  `json:"upload_sec"`
+	IPv4        string  `json:"ipv4,omitempty"`
+	RxBytes     uint64  `json:"rx_bytes,omitempty"`
+	TxBytes     uint64  `json:"tx_bytes,omitempty"`
+	RxErrors    uint64  `json:"rx_errors,omitempty"`
+	TxErrors    uint64  `json:"tx_errors,omitempty"`
+	RxDrops     uint64  `json:"rx_drops,omitempty"`
+	TxDrops     uint64  `json:"tx_drops,omitempty"`
+	RxErrRate   float64 `json:"rx_err_rate,omitempty"`
+	TxErrRate   float64 `json:"tx_err_rate,omitempty"`
+	RxDropRate  float64 `json:"rx_drop_rate,omitempty"`
+	TxDropRate  float64 `json:"tx_drop_rate,omitempty"`
 }
 
 type LoadInfo struct {
@@ -192,6 +199,10 @@ func BuildSnapshot(
 			TxErrors:    iface.TxErrors,
 			RxDrops:     iface.RxDrops,
 			TxDrops:     iface.TxDrops,
+			RxErrRate:   iface.RxErrRate,
+			TxErrRate:   iface.TxErrRate,
+			RxDropRate:  iface.RxDropRate,
+			TxDropRate:  iface.TxDropRate,
 		})
 	}
 
@@ -235,7 +246,10 @@ func BuildSnapshot(
 			TotalDownloadSec: stats.NetInSpeed,
 			TotalUploadSec:   stats.NetOutSpeed,
 			TCPConns:         stats.TCPCount,
+			TCPStates:        stats.TCPStates,
 			UDPConns:         stats.UDPCount,
+			ConntrackCount:   stats.ConntrackCount,
+			ConntrackMax:     stats.ConntrackMax,
 			Interfaces:       ifaces,
 		},
 		Load: LoadInfo{
@@ -277,6 +291,21 @@ func buildProcessEntries(procs []vminfo.ProcessInfo) []ProcessEntry {
 	}
 	return entries
 }
+
+// Network health thresholds. Error/drop rates are events per second summed
+// across non-loopback interfaces; TCP is the total socket count. Rates (not
+// cumulative counters) gate the warnings so a long-lived total does not keep
+// an otherwise-healthy host flagged indefinitely.
+const (
+	networkErrRateWarning          = 10.0
+	networkErrRateCritical         = 100.0
+	networkDropRateWarning         = 10.0
+	networkDropRateCritical        = 100.0
+	tcpConnWarning          uint32 = 5000
+	tcpConnCritical         uint32 = 20000
+	conntrackWarnPct               = 85.0
+	conntrackCriticalPct           = 95.0
+)
 
 func buildHealth(static vminfo.StaticInfo, stats vminfo.RuntimeStats, procs []ProcessEntry) HealthInfo {
 	warnings := make([]HealthWarning, 0, 4)
@@ -333,6 +362,41 @@ func buildHealth(static vminfo.StaticInfo, stats vminfo.RuntimeStats, procs []Pr
 		}
 	}
 
+	// Network: surface sustained interface error/drop rates and very high
+	// TCP connection counts.
+	var netErrRate, netDropRate float64
+	for _, iface := range stats.Interfaces {
+		netErrRate += iface.RxErrRate + iface.TxErrRate
+		netDropRate += iface.RxDropRate + iface.TxDropRate
+	}
+	switch {
+	case netErrRate >= networkErrRateCritical:
+		add("critical", "network_errors", fmt.Sprintf("network interface errors %.0f/s", netErrRate))
+	case netErrRate >= networkErrRateWarning:
+		add("warning", "network_errors", fmt.Sprintf("network interface errors %.0f/s", netErrRate))
+	}
+	switch {
+	case netDropRate >= networkDropRateCritical:
+		add("critical", "network_drops", fmt.Sprintf("packet drops %.0f/s", netDropRate))
+	case netDropRate >= networkDropRateWarning:
+		add("warning", "network_drops", fmt.Sprintf("packet drops %.0f/s", netDropRate))
+	}
+	switch {
+	case stats.TCPCount >= tcpConnCritical:
+		add("critical", "tcpconn_high", fmt.Sprintf("%d TCP connections", stats.TCPCount))
+	case stats.TCPCount >= tcpConnWarning:
+		add("warning", "tcpconn_high", fmt.Sprintf("%d TCP connections", stats.TCPCount))
+	}
+	if stats.ConntrackMax > 0 {
+		conntrackPct := float64(stats.ConntrackCount) / float64(stats.ConntrackMax) * 100
+		switch {
+		case conntrackPct >= conntrackCriticalPct:
+			add("critical", "conntrack_high", fmt.Sprintf("conntrack %.0f%% full (%d/%d)", conntrackPct, stats.ConntrackCount, stats.ConntrackMax))
+		case conntrackPct >= conntrackWarnPct:
+			add("warning", "conntrack_high", fmt.Sprintf("conntrack %.0f%% full (%d/%d)", conntrackPct, stats.ConntrackCount, stats.ConntrackMax))
+		}
+	}
+
 	score := 100
 	for _, warning := range warnings {
 		if warning.Level == "critical" {
@@ -358,13 +422,17 @@ func buildHealthFromSnapshot(snap Snapshot) HealthInfo {
 		SwapTotal: snap.Memory.SwapTotal,
 	}
 	stats := vminfo.RuntimeStats{
-		CPU:        snap.CPU.TotalPercent,
-		CPUCount:   snap.System.Cores,
-		MemUsed:    snap.Memory.Used,
-		SwapUsed:   snap.Memory.SwapUsed,
-		DiskUsed:   firstFilesystemUsed(snap.Disk.Filesystems),
-		Load1:      snap.Load.Load1,
-		Interfaces: snapshotInterfaces(snap.Network.Interfaces),
+		CPU:            snap.CPU.TotalPercent,
+		CPUCount:       snap.System.Cores,
+		MemUsed:        snap.Memory.Used,
+		SwapUsed:       snap.Memory.SwapUsed,
+		DiskUsed:       firstFilesystemUsed(snap.Disk.Filesystems),
+		Load1:          snap.Load.Load1,
+		Interfaces:     snapshotInterfaces(snap.Network.Interfaces),
+		TCPCount:       snap.Network.TCPConns,
+		UDPCount:       snap.Network.UDPConns,
+		ConntrackCount: snap.Network.ConntrackCount,
+		ConntrackMax:   snap.Network.ConntrackMax,
 	}
 	return buildHealth(static, stats, snap.Processes.List)
 }
@@ -387,11 +455,15 @@ func snapshotInterfaces(items []NetInterface) []vminfo.InterfaceIO {
 	out := make([]vminfo.InterfaceIO, 0, len(items))
 	for _, item := range items {
 		out = append(out, vminfo.InterfaceIO{
-			Name:     item.Name,
-			RxErrors: item.RxErrors,
-			TxErrors: item.TxErrors,
-			RxDrops:  item.RxDrops,
-			TxDrops:  item.TxDrops,
+			Name:       item.Name,
+			RxErrors:   item.RxErrors,
+			TxErrors:   item.TxErrors,
+			RxDrops:    item.RxDrops,
+			TxDrops:    item.TxDrops,
+			RxErrRate:  item.RxErrRate,
+			TxErrRate:  item.TxErrRate,
+			RxDropRate: item.RxDropRate,
+			TxDropRate: item.TxDropRate,
 		})
 	}
 	return out

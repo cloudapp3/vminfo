@@ -16,6 +16,7 @@
         diskioTable: document.getElementById('diskio-table'),
         cpuStats: document.getElementById('cpu-stats'),
         networkSummary: document.getElementById('network-summary'),
+        networkConnections: document.getElementById('network-connections'),
         networkInterfaces: document.getElementById('network-interfaces'),
         healthSummary: document.getElementById('health-summary'),
         procCount: document.getElementById('proc-count'),
@@ -177,6 +178,8 @@
                 '</div>' +
             '</div>';
 
+        renderNetworkConnections(net);
+
         if (interfaces.length === 0) {
             dom.networkInterfaces.innerHTML = '<div class="color-muted">No network interface data</div>';
             return;
@@ -236,6 +239,26 @@
                 '</tr></thead>' +
                 '<tbody>' + visibleRows + '</tbody>' +
             '</table>';
+    }
+
+    function renderNetworkConnections(net) {
+        var states = net.tcp_states || {};
+        var order = ['ESTABLISHED', 'TIME_WAIT', 'SYN_RECV', 'CLOSE_WAIT', 'LISTEN'];
+        var parts = [];
+        for (var i = 0; i < order.length; i++) {
+            var s = order[i];
+            if (states[s]) {
+                parts.push('<span class="metric-group"><span class="net-label">' + s + '</span><span class="metric-value">' + states[s] + '</span></span>');
+            }
+        }
+        if (net.conntrack_max > 0) {
+            var pct = (net.conntrack_count || 0) / net.conntrack_max * 100;
+            var color = thresholdColor(pct);
+            parts.push('<span class="metric-group"><span class="net-label">conntrack</span><span class="metric-value" style="color:' + color + '">' + (net.conntrack_count || 0) + '/' + net.conntrack_max + ' (' + pct.toFixed(0) + '%)</span></span>');
+        }
+        dom.networkConnections.innerHTML = parts.length > 0
+            ? '<div class="network-conn-states">' + parts.join('') + '</div>'
+            : '';
     }
 
     // --- Health Summary ---

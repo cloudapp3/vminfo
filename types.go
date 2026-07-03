@@ -29,27 +29,30 @@ type StaticInfo struct {
 
 // RuntimeStats contains sampled runtime metrics for the local host.
 type RuntimeStats struct {
-	CPU          float64       `json:"cpu"`
-	CPUPerCore   []float64     `json:"cpu_per_core,omitempty"`
-	CPUCount     int           `json:"cpu_count,omitempty"`
-	CPUFreqMHz   float64       `json:"cpu_freq_mhz,omitempty"`
-	MemUsed      uint64        `json:"mem_used,omitempty"`
-	SwapUsed     uint64        `json:"swap_used,omitempty"`
-	DiskUsed     uint64        `json:"disk_used,omitempty"`
-	NetIn        uint64        `json:"net_in,omitempty"`
-	NetOut       uint64        `json:"net_out,omitempty"`
-	NetInSpeed   uint64        `json:"net_in_speed,omitempty"`
-	NetOutSpeed  uint64        `json:"net_out_speed,omitempty"`
-	Load1        float64       `json:"load1,omitempty"`
-	Load5        float64       `json:"load5,omitempty"`
-	Load15       float64       `json:"load15,omitempty"`
-	TCPCount     uint32        `json:"tcp_count,omitempty"`
-	UDPCount     uint32        `json:"udp_count,omitempty"`
-	ProcessCount uint32        `json:"process_count,omitempty"`
-	Uptime       uint64        `json:"uptime,omitempty"`
-	DiskIO       []DiskIOStats `json:"disk_io,omitempty"`
-	Temps        []TempReading `json:"temps,omitempty"`
-	Interfaces   []InterfaceIO `json:"interfaces,omitempty"`
+	CPU            float64           `json:"cpu"`
+	CPUPerCore     []float64         `json:"cpu_per_core,omitempty"`
+	CPUCount       int               `json:"cpu_count,omitempty"`
+	CPUFreqMHz     float64           `json:"cpu_freq_mhz,omitempty"`
+	MemUsed        uint64            `json:"mem_used,omitempty"`
+	SwapUsed       uint64            `json:"swap_used,omitempty"`
+	DiskUsed       uint64            `json:"disk_used,omitempty"`
+	NetIn          uint64            `json:"net_in,omitempty"`
+	NetOut         uint64            `json:"net_out,omitempty"`
+	NetInSpeed     uint64            `json:"net_in_speed,omitempty"`
+	NetOutSpeed    uint64            `json:"net_out_speed,omitempty"`
+	Load1          float64           `json:"load1,omitempty"`
+	Load5          float64           `json:"load5,omitempty"`
+	Load15         float64           `json:"load15,omitempty"`
+	TCPCount       uint32            `json:"tcp_count,omitempty"`
+	TCPStates      map[string]uint32 `json:"tcp_states,omitempty"`
+	UDPCount       uint32            `json:"udp_count,omitempty"`
+	ConntrackCount uint32            `json:"conntrack_count,omitempty"`
+	ConntrackMax   uint32            `json:"conntrack_max,omitempty"`
+	ProcessCount   uint32            `json:"process_count,omitempty"`
+	Uptime         uint64            `json:"uptime,omitempty"`
+	DiskIO         []DiskIOStats     `json:"disk_io,omitempty"`
+	Temps          []TempReading     `json:"temps,omitempty"`
+	Interfaces     []InterfaceIO     `json:"interfaces,omitempty"`
 }
 
 // DiskIOStats holds per-device disk I/O statistics.
@@ -84,6 +87,13 @@ type InterfaceIO struct {
 	TxErrors uint64 `json:"tx_errors,omitempty"`
 	RxDrops  uint64 `json:"rx_drops,omitempty"`
 	TxDrops  uint64 `json:"tx_drops,omitempty"`
+	// Per-second rates derived from consecutive samples; zero until the
+	// second sample arrives. Used by health scoring so a long-lived
+	// cumulative counter does not cause persistent false alarms.
+	RxErrRate  float64 `json:"rx_err_rate,omitempty"`
+	TxErrRate  float64 `json:"tx_err_rate,omitempty"`
+	RxDropRate float64 `json:"rx_drop_rate,omitempty"`
+	TxDropRate float64 `json:"tx_drop_rate,omitempty"`
 }
 
 // Snapshot combines static host metadata with sampled runtime metrics.

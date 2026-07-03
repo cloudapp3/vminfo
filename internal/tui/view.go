@@ -404,6 +404,11 @@ func (m Model) renderNetworkContent() string {
 		lines = append(lines, "", traffic)
 	}
 
+	conns := m.renderNetworkConnectionsSection()
+	if conns != "" {
+		lines = append(lines, "", conns)
+	}
+
 	ifaces := m.renderNetworkInterfaces()
 	if ifaces != "" {
 		lines = append(lines, "", ifaces)
@@ -471,6 +476,32 @@ func (m Model) renderNetworkTrafficSection() string {
 	lines := []string{
 		"  " + subtleStyle.Render("Traffic "+strings.Repeat("─", dashCount)),
 		"  " + subtleStyle.Render("Total") + "  " + rx + "  " + tx,
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderNetworkConnectionsSection() string {
+	if m.width < 80 {
+		return ""
+	}
+	var parts []string
+	for _, name := range []string{"ESTABLISHED", "TIME_WAIT", "SYN_RECV", "CLOSE_WAIT", "LISTEN"} {
+		if n := m.stats.TCPStates[name]; n > 0 {
+			parts = append(parts, subtleStyle.Render(name)+" "+valueStyle.Render(fmt.Sprintf("%d", n)))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	dashCount := max(calcFullWidth(m.width)-18, 12)
+	lines := []string{
+		"  " + subtleStyle.Render("Connections "+strings.Repeat("─", dashCount)),
+		"  " + strings.Join(parts, "  "),
+	}
+	if m.stats.ConntrackMax > 0 {
+		pct := float64(m.stats.ConntrackCount) / float64(m.stats.ConntrackMax) * 100
+		ct := lipgloss.NewStyle().Foreground(loadColor(pct, 100)).Render(fmt.Sprintf("%d/%d (%.0f%%)", m.stats.ConntrackCount, m.stats.ConntrackMax, pct))
+		lines = append(lines, "  "+subtleStyle.Render("conntrack")+" "+ct)
 	}
 	return strings.Join(lines, "\n")
 }

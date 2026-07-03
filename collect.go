@@ -271,8 +271,9 @@ func buildRuntimeStats(ctx context.Context, opts Options, base hostBase) (Runtim
 		stats.Load15 = avg.Load15
 	}
 
-	stats.TCPCount = countTCPConnections()
+	stats.TCPCount, stats.TCPStates = readTCPStates()
 	stats.UDPCount = countUDPConnections()
+	stats.ConntrackCount, stats.ConntrackMax = conntrackUsage()
 	stats.ProcessCount = countProcesses(ctx)
 	return stats, nil
 }
@@ -562,17 +563,25 @@ func calcIfaceSpeeds(start, end map[string]netIfaceSample, addrs map[string]stri
 		}
 		rxSpeed := uint64(float64(diffUint64(e.in, s.in)) / seconds)
 		txSpeed := uint64(float64(diffUint64(e.out, s.out)) / seconds)
+		rxErrRate := float64(diffUint64(e.rxErrors, s.rxErrors)) / seconds
+		txErrRate := float64(diffUint64(e.txErrors, s.txErrors)) / seconds
+		rxDropRate := float64(diffUint64(e.rxDrops, s.rxDrops)) / seconds
+		txDropRate := float64(diffUint64(e.txDrops, s.txDrops)) / seconds
 		result = append(result, InterfaceIO{
-			Name:     name,
-			RxSpeed:  rxSpeed,
-			TxSpeed:  txSpeed,
-			IPv4:     addrs[name],
-			RxBytes:  e.in,
-			TxBytes:  e.out,
-			RxErrors: e.rxErrors,
-			TxErrors: e.txErrors,
-			RxDrops:  e.rxDrops,
-			TxDrops:  e.txDrops,
+			Name:       name,
+			RxSpeed:    rxSpeed,
+			TxSpeed:    txSpeed,
+			IPv4:       addrs[name],
+			RxBytes:    e.in,
+			TxBytes:    e.out,
+			RxErrors:   e.rxErrors,
+			TxErrors:   e.txErrors,
+			RxDrops:    e.rxDrops,
+			TxDrops:    e.txDrops,
+			RxErrRate:  rxErrRate,
+			TxErrRate:  txErrRate,
+			RxDropRate: rxDropRate,
+			TxDropRate: txDropRate,
 		})
 	}
 	return result

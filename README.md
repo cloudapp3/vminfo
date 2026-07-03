@@ -62,7 +62,7 @@ Use vminfo when you need to:
 
 ## Preview
 
-![vminfo preview](https://raw.githubusercontent.com/cloudapp3/vmdocs/main/sites/vminfo/docs/assets/tui-demo.gif)
+![vminfo preview](https://raw.githubusercontent.com/cloudapp3/vmdocs/main/sites/vminfo/docs/assets/tui-overview-refreshed.png)
 
 > Screens may vary slightly by terminal width, font, and theme.
 
