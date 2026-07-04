@@ -4,6 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>vminfo Dashboard</title>
+    <script>
+        // Apply saved theme before first paint to avoid a flash of the wrong theme.
+        (function () {
+            try {
+                var t = localStorage.getItem('vminfo-theme') || 'auto';
+                document.documentElement.setAttribute('data-theme', t);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'auto');
+            }
+        })();
+    </script>
     <link rel="stylesheet" href="/css/dashboard.css">
 </head>
 <body>
@@ -18,65 +29,105 @@
             <span id="ws-status-text">CONNECTING</span>
             <span class="separator">│</span>
             <span id="update-time">--:--:--</span>
+            <span class="separator">│</span>
+            <label class="theme-switch">
+                <span class="theme-icon" aria-hidden="true">◐</span>
+                <select id="theme-select" aria-label="Theme">
+                    <option value="auto">Auto</option>
+                    <option value="neon">Neon</option>
+                    <option value="light">Light</option>
+                    <option value="terminal">Terminal</option>
+                    <option value="synthwave">Synthwave</option>
+                </select>
+            </label>
         </div>
     </header>
 
-    <main class="grid-container">
-        <!-- Row 1: System + Disk I/O -->
-        <section class="panel" id="panel-system">
-            <h2><span class="icon">&#9672;</span> System</h2>
-            <div class="panel-body">
-                <table class="info-table" id="system-info"></table>
-            </div>
-        </section>
-
-        <section class="panel" id="panel-diskio">
-            <h2><span class="icon">&#9670;</span> Disk I/O</h2>
-            <div class="panel-body">
-                <table class="data-table" id="diskio-table"></table>
-            </div>
-        </section>
-
-        <!-- Row 2: Resources -->
-        <section class="panel panel-full" id="panel-resources">
-            <h2><span class="icon">&#9673;</span> Resources</h2>
-            <div class="panel-body resources-grid">
-                <div class="resources-left">
-                    <div class="progress-row" id="cpu-bar"></div>
-                    <div class="progress-row" id="mem-bar"></div>
-                    <div class="progress-row" id="swap-bar"></div>
-                    <div class="progress-row" id="disk-bar"></div>
+    <main class="layout">
+        <!-- Center column (main) -->
+        <section class="col col-center">
+            <section class="panel" id="panel-resources">
+                <h2><span class="icon">&#9673;</span> Resources</h2>
+                <div class="panel-body resources-grid">
+                    <div class="resources-left">
+                        <div class="gauge-block" id="mem-ring"></div>
+                        <div class="progress-row" id="cpu-bar"></div>
+                        <div class="progress-row" id="swap-bar"></div>
+                        <div class="progress-row" id="disk-bar"></div>
+                    </div>
+                    <div class="resources-divider"></div>
+                    <div class="resources-right">
+                        <div class="cores-container" id="cores-bar"></div>
+                    </div>
                 </div>
-                <div class="resources-divider"></div>
-                <div class="resources-right">
+            </section>
+
+            <section class="panel" id="panel-network">
+                <h2><span class="icon">&#9678;</span> Network &amp; Load</h2>
+                <div class="panel-body">
+                    <div class="chart-head">
+                        <span class="chart-title">Throughput</span>
+                        <span class="chart-legend"><span class="leg-dot down"></span>down <span class="leg-dot up"></span>up</span>
+                    </div>
+                    <canvas id="net-chart" height="90"></canvas>
+                    <div class="network-summary" id="network-summary"></div>
+                    <div class="network-interfaces" id="network-interfaces"></div>
+                </div>
+            </section>
+        </section>
+
+        <!-- Left rail -->
+        <aside class="col col-left">
+            <section class="panel" id="panel-system">
+                <h2><span class="icon">&#9672;</span> System</h2>
+                <div class="panel-body">
+                    <table class="info-table" id="system-info"></table>
+                </div>
+            </section>
+
+            <section class="panel" id="panel-health">
+                <h2><span class="icon">&#9888;</span> System Health</h2>
+                <div class="panel-body">
+                    <div class="health-summary" id="health-summary"></div>
+                </div>
+            </section>
+
+            <section class="panel" id="panel-diskio">
+                <h2><span class="icon">&#9670;</span> Disk I/O</h2>
+                <div class="panel-body">
+                    <table class="data-table" id="diskio-table"></table>
+                </div>
+            </section>
+        </aside>
+
+        <!-- Right rail -->
+        <aside class="col col-right">
+            <section class="panel" id="panel-realtime">
+                <h2><span class="icon">&#9650;</span> Real-time CPU</h2>
+                <div class="panel-body">
                     <div class="sparkline-container">
                         <canvas id="cpu-sparkline" height="40"></canvas>
                         <div class="cpu-stats" id="cpu-stats"></div>
                     </div>
-                    <div class="cores-container" id="cores-bar"></div>
                 </div>
-            </div>
-        </section>
+            </section>
 
-        <!-- Row 3: Network & Load -->
-        <section class="panel panel-full" id="panel-network">
-            <h2><span class="icon">&#9678;</span> Network &amp; Load</h2>
-            <div class="panel-body">
-                <div class="network-summary" id="network-summary"></div>
-                <div class="network-connections" id="network-connections"></div>
-                <div class="network-interfaces" id="network-interfaces"></div>
-            </div>
-        </section>
+            <section class="panel" id="panel-conn">
+                <h2><span class="icon">&#9678;</span> Connections</h2>
+                <div class="panel-body">
+                    <div class="network-connections" id="network-connections"></div>
+                </div>
+            </section>
 
-        <!-- Row 4: Health Summary -->
-        <section class="panel panel-full" id="panel-health">
-            <h2><span class="icon">&#9888;</span> Health Summary</h2>
-            <div class="panel-body">
-                <div class="health-summary" id="health-summary"></div>
-            </div>
-        </section>
+            <section class="panel" id="panel-alerts">
+                <h2><span class="icon">&#9888;</span> Alerts</h2>
+                <div class="panel-body">
+                    <div id="alerts-block"></div>
+                </div>
+            </section>
+        </aside>
 
-        <!-- Row 5: Processes -->
+        <!-- Bottom (full width) -->
         <section class="panel panel-full" id="panel-processes">
             <h2>
                 <span class="icon">&#128203;</span> Processes
@@ -113,6 +164,7 @@
     </main>
 
     <script src="/js/widgets.js"></script>
+    <script src="/js/theme.js"></script>
     <script src="/js/websocket.js"></script>
     <script src="/js/app.js"></script>
 </body>

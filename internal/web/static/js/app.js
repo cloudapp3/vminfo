@@ -7,6 +7,17 @@
         procFilter: ''
     };
 
+    // Client-side rolling history for charts that vminfo only sends as the
+    // latest sample (no time series). Capped to keep memory bounded.
+    var netHistory = { down: [], up: [], max: 60 };
+    function pushNetHistory(snap) {
+        var net = snap.network || {};
+        netHistory.down.push(net.total_download_sec || 0);
+        netHistory.up.push(net.total_upload_sec || 0);
+        while (netHistory.down.length > netHistory.max) netHistory.down.shift();
+        while (netHistory.up.length > netHistory.max) netHistory.up.shift();
+    }
+
     var dom = {
         hostname: document.getElementById('hostname'),
         wsStatus: document.getElementById('ws-status'),
@@ -19,6 +30,7 @@
         networkConnections: document.getElementById('network-connections'),
         networkInterfaces: document.getElementById('network-interfaces'),
         healthSummary: document.getElementById('health-summary'),
+        alertsBlock: document.getElementById('alerts-block'),
         procCount: document.getElementById('proc-count'),
         procTbody: document.getElementById('proc-tbody'),
         procFilter: document.getElementById('proc-filter'),
@@ -46,9 +58,17 @@
         }
     });
 
+    // Re-render when the theme changes so data-driven colors update live.
+    if (window.VMinfoTheme) {
+        VMinfoTheme.onChange(function() {
+            if (state.snapshot) handleSnapshot(state.snapshot);
+        });
+    }
+
     // --- Main update ---
     function handleSnapshot(snap) {
         state.snapshot = snap;
+        pushNetHistory(snap);
         renderHeader(snap);
         renderSystem(snap.system, snap.processes ? snap.processes.total : 0);
         renderDiskIO(snap.disk);
@@ -115,7 +135,14 @@
     // --- Resources Panel ---
     function renderResources(snap) {
         renderProgressBar('cpu-bar', 'CPU', snap.cpu.total_percent);
-        renderProgressBar('mem-bar', 'Mem', snap.memory.percent, snap.memory.used, snap.memory.total);
+
+        renderRingGauge('mem-ring', {
+            percent: snap.memory.percent,
+            color: thresholdColor(snap.memory.percent),
+            label: 'Memory',
+            sub: formatBytes(snap.memory.used) + ' / ' + formatBytes(snap.memory.total)
+        });
+
         renderProgressBar('swap-bar', 'Swap', snap.memory.swap_percent, snap.memory.swap_used, snap.memory.swap_total);
 
         if (snap.disk.filesystems && snap.disk.filesystems.length > 0) {
@@ -126,7 +153,7 @@
         }
 
         if (snap.cpu.history) {
-            renderSparkline('cpu-sparkline', snap.cpu.history, 100);
+            renderBarChart('cpu-sparkline', snap.cpu.history, 60);
         }
 
         dom.cpuStats.innerHTML =
@@ -146,6 +173,12 @@
     // --- Network Panel ---
     function renderNetwork(snap) {
         var net = snap.network || {};
+
+        renderLineChart('net-chart', [
+            { data: netHistory.down, color: themeColor('green', '#00ff9c'), fill: 0.18 },
+            { data: netHistory.up, color: themeColor('pink', '#ff79c6'), fill: 0.0 }
+        ]);
+
         var load = snap.load || {};
         var cores = (snap.system && snap.system.cores) || 1;
         var interfaces = sortInterfaces(net.interfaces || []);
@@ -243,67 +276,108 @@
 
     function renderNetworkConnections(net) {
         var states = net.tcp_states || {};
-        var order = ['ESTABLISHED', 'TIME_WAIT', 'SYN_RECV', 'CLOSE_WAIT', 'LISTEN'];
-        var parts = [];
+        var order = [
+            ['ESTABLISHED', themeColor('cyan', '#22d3ee')],
+            ['TIME_WAIT', themeColor('purple', '#a855f7')],
+            ['SYN_RECV', themeColor('blue', '#4ea8ff')],
+            ['CLOSE_WAIT', themeColor('orange', '#ff9d4d')],
+            ['FIN_WAIT', themeColor('yellow', '#ffd24a')],
+            ['LISTEN', themeColor('green', '#00ff9c')]
+        ];
+
+        var entries = [];
+        var maxState = 1;
         for (var i = 0; i < order.length; i++) {
-            var s = order[i];
-            if (states[s]) {
-                parts.push('<span class="metric-group"><span class="net-label">' + s + '</span><span class="metric-value">' + states[s] + '</span></span>');
+            var name = order[i][0];
+            var value = states[name];
+            if (value) {
+                entries.push({ name: name, value: value, color: order[i][1] });
+                if (value > maxState) maxState = value;
             }
         }
-        if (net.conntrack_max > 0) {
-            var pct = (net.conntrack_count || 0) / net.conntrack_max * 100;
-            var color = thresholdColor(pct);
-            parts.push('<span class="metric-group"><span class="net-label">conntrack</span><span class="metric-value" style="color:' + color + '">' + (net.conntrack_count || 0) + '/' + net.conntrack_max + ' (' + pct.toFixed(0) + '%)</span></span>');
+
+        var html = '';
+        if (entries.length > 0) {
+            html += '<div class="conn-bars">';
+            for (var j = 0; j < entries.length; j++) {
+                var e = entries[j];
+                var pct = (e.value / maxState) * 100;
+                html += '<div class="conn-row">' +
+                    '<span class="conn-name">' + e.name + '</span>' +
+                    '<span class="conn-track"><span class="conn-fill" style="width:' + pct.toFixed(1) + '%;background:' + e.color + '"></span></span>' +
+                    '<span class="conn-val" style="color:' + e.color + '">' + e.value + '</span>' +
+                    '</div>';
+            }
+            html += '</div>';
+        } else {
+            html += '<div class="color-muted">No connection state data</div>';
         }
-        dom.networkConnections.innerHTML = parts.length > 0
-            ? '<div class="network-conn-states">' + parts.join('') + '</div>'
-            : '';
+
+        var meta = '<span class="metric-group"><span class="net-label">TCP</span><span class="metric-value">' + (net.tcp_connections || 0) + '</span></span>' +
+            '<span class="metric-group"><span class="net-label">UDP</span><span class="metric-value">' + (net.udp_connections || 0) + '</span></span>';
+        if (net.conntrack_max > 0) {
+            var cp = (net.conntrack_count || 0) / net.conntrack_max * 100;
+            meta += '<span class="metric-group"><span class="net-label">conntrack</span><span class="metric-value" style="color:' + thresholdColor(cp) + '">' + (net.conntrack_count || 0) + '/' + net.conntrack_max + ' (' + cp.toFixed(0) + '%)</span></span>';
+        }
+        html += '<div class="conn-meta">' + meta + '</div>';
+
+        dom.networkConnections.innerHTML = html;
     }
 
-    // --- Health Summary ---
+    // --- Health (score ring in left rail, alerts in right rail) ---
     function renderHealth(snap) {
         var health = snap.health || { score: 100, warnings: [] };
         var warnings = health.warnings || [];
         var score = typeof health.score === 'number' ? health.score : 100;
-        var scoreColor = score >= 85 ? '#00ff87' : (score >= 65 ? '#ffd700' : '#ff5555');
+        var hc = (window.VMinfoTheme && VMinfoTheme.colors) || {};
+        var scoreColor = score >= 85 ? (hc.green || '#00ff9c') : (score >= 65 ? (hc.yellow || '#ffd24a') : (hc.red || '#ff5c6c'));
+        var statusText = score >= 85 ? 'Excellent' : (score >= 65 ? 'Warning' : 'Critical');
         var topProcesses = ((snap.processes && snap.processes.list) || []).slice(0, 5);
 
-        var html =
+        // Left rail: ring gauge + status + top CPU
+        var leftHtml =
             '<div class="health-head">' +
-                '<div class="health-score" style="color:' + scoreColor + '">' + score + '</div>' +
-                '<div><div class="health-title">Host health score</div>' +
-                '<div class="health-subtitle">' + warnings.length + ' active warning' + (warnings.length === 1 ? '' : 's') + '</div></div>' +
+                '<div class="gauge-block" id="health-ring"></div>' +
+                '<div class="health-meta">' +
+                    '<div class="health-title" style="color:' + scoreColor + '">' + statusText + '</div>' +
+                    '<div class="health-subtitle">' + warnings.length + ' active warning' + (warnings.length === 1 ? '' : 's') + '</div>' +
+                '</div>' +
             '</div>';
 
-        if (warnings.length === 0) {
-            html += '<div class="health-ok">No immediate CPU, memory, disk, network, or process pressure detected.</div>';
-        } else {
-            html += '<div class="health-warnings">';
-            for (var i = 0; i < Math.min(warnings.length, 5); i++) {
-                var w = warnings[i];
-                var cls = w.level === 'critical' ? 'critical' : 'warning';
-                html += '<div class="health-warning ' + cls + '">' +
-                    '<span class="health-level">' + escapeHtml(String(w.level || 'warning')).toUpperCase() + '</span>' +
-                    '<span>' + escapeHtml(String(w.message || w.code || 'warning')) + '</span>' +
-                    '</div>';
-            }
-            html += '</div>';
-        }
-
         if (topProcesses.length > 0) {
-            html += '<div class="health-top"><span class="net-label">Top CPU</span>';
+            leftHtml += '<div class="health-top"><span class="net-label">Top CPU</span>';
             for (var j = 0; j < topProcesses.length; j++) {
                 var p = topProcesses[j];
-                html += '<span class="health-proc">' +
+                leftHtml += '<span class="health-proc">' +
                     escapeHtml(String(p.name || p.command || p.pid)) +
                     ' <span style="color:' + thresholdColor(p.cpu_percent || 0) + '">' +
                     Number(p.cpu_percent || 0).toFixed(1) + '%</span></span>';
             }
-            html += '</div>';
+            leftHtml += '</div>';
         }
+        dom.healthSummary.innerHTML = leftHtml;
+        renderRingGauge('health-ring', { percent: score, color: scoreColor, value: score });
 
-        dom.healthSummary.innerHTML = html;
+        // Right rail: alerts
+        var alertsHtml = '';
+        if (warnings.length === 0) {
+            alertsHtml = '<div class="alerts-ok"><span class="alerts-dot"></span>All systems operational</div>';
+        } else {
+            alertsHtml = '<div class="alerts-list">';
+            for (var i = 0; i < Math.min(warnings.length, 6); i++) {
+                var w = warnings[i];
+                var cls = w.level === 'critical' ? 'critical' : 'warning';
+                alertsHtml += '<div class="alert-row ' + cls + '">' +
+                    '<span class="alert-level">' + escapeHtml(String(w.level || 'warning')).toUpperCase() + '</span>' +
+                    '<span class="alert-msg">' + escapeHtml(String(w.message || w.code || 'warning')) + '</span>' +
+                    '</div>';
+            }
+            if (warnings.length > 6) {
+                alertsHtml += '<div class="alert-more">+' + (warnings.length - 6) + ' more</div>';
+            }
+            alertsHtml += '</div>';
+        }
+        if (dom.alertsBlock) dom.alertsBlock.innerHTML = alertsHtml;
     }
 
     // --- Processes ---
@@ -423,12 +497,13 @@
     }
 
     function loadColor(load, cores) {
+        var c = (window.VMinfoTheme && VMinfoTheme.colors) || {};
         var safeCores = cores || 1;
         var ratio = load / safeCores;
-        if (ratio >= 1.0) return '#ff5555';
-        if (ratio >= 0.8) return '#ffaf5f';
-        if (ratio >= 0.5) return '#ffd700';
-        return '#00ff87';
+        if (ratio >= 1.0) return c.red || '#ff5c6c';
+        if (ratio >= 0.8) return c.orange || '#ff9d4d';
+        if (ratio >= 0.5) return c.yellow || '#ffd24a';
+        return c.green || '#00ff9c';
     }
 
     function loadBarChar(load, cores) {
