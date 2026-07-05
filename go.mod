@@ -1,6 +1,6 @@
 module github.com/cloudapp3/vminfo
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
@@ -9,6 +9,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/tklauser/go-sysconf v0.3.12
+	golang.org/x/net v0.56.0
 )
 
 require (
@@ -37,6 +38,6 @@ require (
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	golang.org/x/sys v0.38.0 // indirect
-	golang.org/x/text v0.3.8 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 )

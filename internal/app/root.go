@@ -206,6 +206,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runKill(ctx, stdout, args[1:], tr)
 	case "update":
 		return runUpdate(ctx, stdout, stderr, args[1:], tr)
+	case "net":
+		return runNet(ctx, stdout, stderr, args[1:], tr)
 	default:
 		_, _ = fmt.Fprintf(stderr, tr.T("unknown command: %s")+"\n\n", cmd)
 		_, _ = io.WriteString(stderr, helpText(tr))
@@ -1010,6 +1012,10 @@ func helpText(tr *i18n.Translator) string {
 		"  vminfo kill <pid>      " + tr.T("send SIGTERM on Linux"),
 		"  vminfo update          " + tr.T("check for and install updates"),
 		"  vminfo update --check  " + tr.T("check for updates without installing"),
+		"  vminfo net dns <domain>  " + tr.T("resolve domain via DNS"),
+		"  vminfo net port <h> <p>  " + tr.T("test TCP port connectivity"),
+		"  vminfo net ping <host>   " + tr.T("probe host reachability (default tcp; --mode icmp)"),
+		"  vminfo net ip [<ip>]      " + tr.T("lookup IP geo/ASN (no arg = your public IP; via ip.bestcheapvps.org)"),
 		"  vminfo --version       " + tr.T("show app version"),
 		"  vminfo --help          " + tr.T("show help"),
 		"",
@@ -1025,7 +1031,7 @@ func helpText(tr *i18n.Translator) string {
 		"  --no-update-check      " + tr.T("skip background update check"),
 		"",
 		tr.T("Status:"),
-		"  " + tr.T("TUI, web, summary, watch, ps, kill, update, and version are implemented."),
+		"  " + tr.T("TUI, web, summary, watch, ps, kill, update, net, and version are implemented."),
 	}, "\n") + "\n"
 }
 

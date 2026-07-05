@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/cloudapp3/vminfo/internal/collector"
@@ -137,5 +138,56 @@ func TestProcessEntryMatchesPIDPPIDCommandUserAndStatus(t *testing.T) {
 				t.Fatalf("expected %q to match %+v", filter, item)
 			}
 		})
+	}
+}
+
+func TestHandleNetDiagRejectsNonPOST(t *testing.T) {
+	srv := &Server{}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/net/diag", nil)
+	rr := httptest.NewRecorder()
+	srv.handleNetDiag(rr, req)
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", rr.Code)
+	}
+}
+
+func TestHandleNetDiagRequiresTarget(t *testing.T) {
+	srv := &Server{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/net/diag", strings.NewReader(`{"action":"dns"}`))
+	rr := httptest.NewRecorder()
+	srv.handleNetDiag(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 missing target, got %d", rr.Code)
+	}
+}
+
+func TestHandleNetDiagUnknownAction(t *testing.T) {
+	srv := &Server{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/net/diag", strings.NewReader(`{"action":"frob","target":"x"}`))
+	rr := httptest.NewRecorder()
+	srv.handleNetDiag(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 unknown action, got %d", rr.Code)
+	}
+}
+
+func TestHandleNetDiagDNS(t *testing.T) {
+	srv := &Server{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/net/diag", strings.NewReader(`{"action":"dns","target":"localhost"}`))
+	rr := httptest.NewRecorder()
+	srv.handleNetDiag(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body: %s)", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleNetDiagPing(t *testing.T) {
+	srv := &Server{}
+	body := strings.NewReader(`{"action":"ping","target":"127.0.0.1","mode":"tcp","port":1,"count":1,"timeout_ms":100}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/net/diag", body)
+	rr := httptest.NewRecorder()
+	srv.handleNetDiag(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body: %s)", rr.Code, rr.Body.String())
 	}
 }

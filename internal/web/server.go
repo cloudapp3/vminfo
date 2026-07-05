@@ -15,9 +15,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 
+	"github.com/cloudapp3/vminfo"
 	"github.com/cloudapp3/vminfo/internal/collector"
 )
 
@@ -102,6 +104,7 @@ func (s *Server) handler() (http.Handler, error) {
 	protectedMux.HandleFunc("/api/v1/processes", s.handleProcesses)
 	protectedMux.HandleFunc("/api/v1/system", s.handleSystem)
 	protectedMux.HandleFunc("/api/v1/health", s.handleHealth)
+	protectedMux.HandleFunc("/api/v1/net/diag", s.handleNetDiag)
 
 	// WebSocket
 	protectedMux.HandleFunc("/ws", s.handleWebSocket)
@@ -222,6 +225,66 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONGzip(w, r, snap.Health)
+}
+
+// NetDiagRequest is the JSON body for POST /api/v1/net/diag.
+type NetDiagRequest struct {
+	Action    string `json:"action"`               // "dns" | "port" | "ping"
+	Target    string `json:"target"`               // domain (dns) or host (port/ping)
+	Port      int    `json:"port,omitempty"`       // port/ping action
+	Server    string `json:"server,omitempty"`     // optional DNS server (dns action)
+	TimeoutMs int    `json:"timeout_ms,omitempty"` // per-probe timeout (port/ping)
+	Count     int    `json:"count,omitempty"`      // ping probe count
+	Mode      string `json:"mode,omitempty"`       // ping mode: tcp | icmp
+}
+
+// handleNetDiag runs a network diagnostic on demand. Same-origin + protectedMux
+// means it inherits token auth like the GET /api/v1/* routes.
+func (s *Server) handleNetDiag(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
+	var req NetDiagRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	req.Action = strings.ToLower(strings.TrimSpace(req.Action))
+	req.Target = strings.TrimSpace(req.Target)
+	if req.Target == "" {
+		http.Error(w, "target is required", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	var result any
+	switch req.Action {
+	case "dns":
+		result = vminfo.ResolveDNS(ctx, req.Target, req.Server)
+	case "port":
+		timeout := time.Duration(req.TimeoutMs) * time.Millisecond
+		if timeout <= 0 {
+			timeout = 2 * time.Second
+		}
+		result = vminfo.CheckPort(ctx, req.Target, req.Port, timeout)
+	case "ping":
+		result = vminfo.Ping(ctx, req.Target, vminfo.PingOptions{
+			Mode:    req.Mode,
+			Count:   req.Count,
+			Port:    req.Port,
+			Timeout: time.Duration(req.TimeoutMs) * time.Millisecond,
+		})
+	case "ip":
+		result = vminfo.LookupIP(ctx, req.Target, req.Server)
+	default:
+		http.Error(w, "unknown action (want: dns | port | ping | ip)", http.StatusBadRequest)
+		return
+	}
+	writeJSONGzip(w, r, result)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {

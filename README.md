@@ -83,7 +83,7 @@ vminfo gives you instant visibility into any host:
 - **Web dashboard** — browser-based UI with REST and WebSocket endpoints (`vminfo --web`)
 - **Go library** — import `github.com/cloudapp3/vminfo` for collection, or `github.com/cloudapp3/vminfo/tui` to embed the interactive terminal UI
 
-Collected metrics: CPU (per-core), memory, swap, disk, disk I/O, network, load, TCP/UDP counts, network interface totals, process list, temperatures, uptime, and host metadata.
+Collected metrics: CPU (per-core), memory, swap, disk, disk I/O, network, load, TCP/UDP counts, TCP state distribution (ESTABLISHED / TIME_WAIT / …), conntrack usage, network interface totals with per-interface error/drop rates, process list, temperatures, uptime, and host metadata.
 
 ## Network & Load panel
 
@@ -92,6 +92,19 @@ Collected metrics: CPU (per-core), memory, swap, disk, disk I/O, network, load, 
 - **Interface prioritization** — active interfaces sort before idle bridges / veth devices
 - **Noise reduction** — idle interfaces fold on narrow layouts, while public/private IPs stay visually distinct
 - **Web parity** — the web dashboard mirrors the same network semantics: totals, sorting, and IP styling
+- **Connection states** — TCP sockets broken down by state (ESTABLISHED, TIME_WAIT, SYN_RECV, …) in both TUI and web
+- **Conntrack usage** — current/max `nf_conntrack` entries with a saturation gauge (Linux)
+
+## Network health warnings
+
+The host health score (`/api/v1/health`, health panel) includes network signals, so a quietly degrading link is no longer invisible:
+
+- `network_errors` — sustained per-interface error rate (events/s, not cumulative counters)
+- `network_drops` — sustained packet-drop rate
+- `tcpconn_high` — unusually high TCP socket count (≥5000 warn / ≥20000 critical)
+- `conntrack_high` — conntrack table filling up (≥85% warn / ≥95% critical)
+
+Rates — not raw counters — gate `network_errors` / `network_drops`, so a long-lived total does not keep an otherwise-healthy host flagged.
 
 ## Commands
 
@@ -117,6 +130,12 @@ vminfo ps --limit 20   # show the first 20 rows after sort/filter
 vminfo ps --json       # processes as JSON
 vminfo ps --sort mem   # sort by cpu|mem|pid|name
 vminfo kill <pid>      # SIGTERM a process (Linux)
+vminfo net dns example.com            # resolve a domain (system or --server)
+vminfo net port example.com 443       # test TCP port connectivity / latency
+vminfo net ping example.com --tcp-port 443   # TCP ping (default; cross-platform)
+vminfo net ping example.com --mode icmp      # real ICMP ping (needs privileges)
+vminfo net ip                         # your public IP + ASN / geo
+vminfo net ip 8.8.8.8                 # lookup a specific IP
 vminfo update          # check + install the latest tagged release
 vminfo update --check  # check without installing
 vminfo update --version v0.1.0
@@ -171,6 +190,9 @@ Endpoints:
 - `GET /api/v1/processes` — process list with optional `filter` / `q`, `sort`, and `limit` query parameters
 - `GET /api/v1/health` — lightweight health score and resource warnings
 - `GET /ws` — live WebSocket stream
+- `POST /api/v1/net/diag` — run a network diagnostic (`{"action":"dns|port|ping|ip","target":...}`); token-protected
+
+The dashboard ships with switchable themes (Auto / Neon / Light / Terminal / Synthwave) from the header; "Auto" follows the OS color scheme. JetBrains Mono is **embedded**, so the dashboard stays self-contained and works offline with no external font requests.
 
 ## Self-update
 
