@@ -130,10 +130,10 @@ vminfo ps --limit 20   # show the first 20 rows after sort/filter
 vminfo ps --json       # processes as JSON
 vminfo ps --sort mem   # sort by cpu|mem|pid|name
 vminfo kill <pid>      # SIGTERM a process (Linux)
-vminfo net dns example.com            # resolve a domain (system or --server)
-vminfo net port example.com 443       # test TCP port connectivity / latency
-vminfo net ping example.com --tcp-port 443   # TCP ping (default; cross-platform)
-vminfo net ping example.com --mode icmp      # real ICMP ping (needs privileges)
+vminfo net dns vminfo.bestcheapvps.org            # resolve a domain (system or --server)
+vminfo net port vminfo.bestcheapvps.org 443       # test TCP port connectivity / latency
+vminfo net ping vminfo.bestcheapvps.org --tcp-port 443   # TCP ping (default; cross-platform)
+vminfo net ping vminfo.bestcheapvps.org --mode icmp      # real ICMP ping (needs privileges)
 vminfo net ip                         # your public IP + ASN / geo
 vminfo net ip 8.8.8.8                 # lookup a specific IP
 vminfo update          # check + install the latest tagged release
