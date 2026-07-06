@@ -158,7 +158,6 @@ Add `--token` when you want to protect the dashboard in a browser:
 - `--token some-value` uses that exact token
 - bare `--token` auto-generates a URL-safe token
 - the first successful `/?token=...` visit sets a cookie, so later page/API/WebSocket requests can continue without keeping the token in the address bar
-- `GET /healthz` stays public so local probes and health checks still work
 
 When binding to all interfaces, startup output now shows friendlier URLs instead of only `0.0.0.0`:
 
@@ -185,7 +184,6 @@ With dashboard auth enabled, the web server also tightens browser access rules:
 
 Endpoints:
 
-- `GET /healthz` — health check
 - `GET /api/v1/snapshot` — current snapshot JSON
 - `GET /api/v1/processes` — process list with optional `filter` / `q`, `sort`, and `limit` query parameters
 - `GET /api/v1/health` — lightweight health score and resource warnings

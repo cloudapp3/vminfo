@@ -23,22 +23,6 @@ func TestAuthProtectedRouteRejectsMissingToken(t *testing.T) {
 	}
 }
 
-func TestAuthHealthzStaysPublic(t *testing.T) {
-	srv := NewServer("127.0.0.1:0", nil, Options{AuthToken: "secret-token"})
-	handler, err := srv.handler()
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-}
-
 func TestAuthQueryTokenSetsCookieAndRedirects(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", nil, Options{AuthToken: "secret-token"})
 	handler, err := srv.handler()

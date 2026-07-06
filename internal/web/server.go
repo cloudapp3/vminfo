@@ -114,11 +114,7 @@ func (s *Server) handler() (http.Handler, error) {
 		protectedHandler = s.auth.wrap(protectedHandler)
 	}
 
-	rootMux := http.NewServeMux()
-	rootMux.HandleFunc("/healthz", s.handleHealthz)
-	rootMux.Handle("/", protectedHandler)
-
-	return withCORS(rootMux, !s.auth.enabled()), nil
+	return withCORS(protectedHandler, !s.auth.enabled()), nil
 }
 
 func (s *Server) broadcastLoop(ctx context.Context) {
@@ -285,13 +281,6 @@ func (s *Server) handleNetDiag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONGzip(w, r, result)
-}
-
-func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
-	writeJSONGzip(w, r, map[string]any{
-		"status":     "ok",
-		"ws_clients": s.hub.clientCount(),
-	})
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
