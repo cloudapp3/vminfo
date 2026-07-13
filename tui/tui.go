@@ -1,4 +1,3 @@
-// Package tui exposes the interactive terminal UI used by the vminfo CLI.
 package tui
 
 import (
