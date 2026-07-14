@@ -15,10 +15,15 @@ import (
 	"github.com/cloudapp3/vminfo/internal/i18n"
 )
 
+const (
+	maxNetProbeCount   = 100
+	maxNetProbeTimeout = 10 * time.Second
+)
+
 // runNet dispatches `vminfo net <action>` subcommands.
 func runNet(ctx context.Context, stdout, stderr io.Writer, args []string, tr *i18n.Translator) error {
 	if len(args) == 0 {
-		return fmt.Errorf("%w: net requires an action: dns | port", ErrUsage)
+		return fmt.Errorf("%w: net requires an action: dns | port | ping | ip", ErrUsage)
 	}
 	action := strings.ToLower(strings.TrimSpace(args[0]))
 	rest := args[1:]
@@ -32,11 +37,53 @@ func runNet(ctx context.Context, stdout, stderr io.Writer, args []string, tr *i1
 	case "ip":
 		return runNetIP(ctx, stdout, stderr, rest, tr)
 	default:
-		return fmt.Errorf("%w: unknown net action %q (want: dns | port)", ErrUsage, action)
+		return fmt.Errorf("%w: unknown net action %q (want: dns | port | ping | ip)", ErrUsage, action)
 	}
 }
 
+// reorderNetFlags lets net subcommands accept flags before or after their
+// positional target while still using the standard library flag package.
+func reorderNetFlags(args []string, specs map[string]bool) ([]string, error) {
+	flags := make([]string, 0, len(args))
+	positionals := make([]string, 0, len(args))
+	hasTerminator := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			hasTerminator = true
+			positionals = append(positionals, args[i+1:]...)
+			break
+		}
+		if arg == "-" || !strings.HasPrefix(arg, "-") {
+			positionals = append(positionals, arg)
+			continue
+		}
+
+		nameValue := strings.TrimLeft(arg, "-")
+		name, _, hasValue := strings.Cut(nameValue, "=")
+		requiresValue, known := specs[name]
+		flags = append(flags, arg)
+		if !known || !requiresValue || hasValue {
+			continue
+		}
+		if i+1 >= len(args) || args[i+1] == "--" {
+			return nil, fmt.Errorf("%w: flag --%s requires a value", ErrUsage, name)
+		}
+		flags = append(flags, args[i+1])
+		i++
+	}
+	if hasTerminator {
+		flags = append(flags, "--")
+	}
+	return append(flags, positionals...), nil
+}
+
 func runNetDNS(ctx context.Context, stdout, stderr io.Writer, args []string, tr *i18n.Translator) error {
+	var err error
+	args, err = reorderNetFlags(args, map[string]bool{"server": true, "json": false})
+	if err != nil {
+		return err
+	}
 	fs := flag.NewFlagSet("net dns", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
@@ -49,7 +96,7 @@ func runNetDNS(ctx context.Context, stdout, stderr io.Writer, args []string, tr 
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("%w: %v", ErrUsage, err)
 	}
 	if fs.NArg() != 1 {
 		return fmt.Errorf("%w: net dns requires exactly one domain", ErrUsage)
@@ -63,6 +110,11 @@ func runNetDNS(ctx context.Context, stdout, stderr io.Writer, args []string, tr 
 }
 
 func runNetPort(ctx context.Context, stdout, stderr io.Writer, args []string, tr *i18n.Translator) error {
+	var err error
+	args, err = reorderNetFlags(args, map[string]bool{"timeout": true, "json": false})
+	if err != nil {
+		return err
+	}
 	fs := flag.NewFlagSet("net port", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
@@ -75,14 +127,17 @@ func runNetPort(ctx context.Context, stdout, stderr io.Writer, args []string, tr
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("%w: %v", ErrUsage, err)
 	}
 	if fs.NArg() != 2 {
 		return fmt.Errorf("%w: net port requires <host> <port>", ErrUsage)
 	}
 	port, err := strconv.Atoi(strings.TrimSpace(fs.Arg(1)))
-	if err != nil || port < 0 || port > 65535 {
+	if err != nil || port < 1 || port > 65535 {
 		return fmt.Errorf("%w: invalid port %q", ErrUsage, fs.Arg(1))
+	}
+	if timeout <= 0 || timeout > maxNetProbeTimeout {
+		return fmt.Errorf("%w: timeout must be > 0 and <= %s", ErrUsage, maxNetProbeTimeout)
 	}
 
 	res := vminfo.CheckPort(ctx, fs.Arg(0), port, timeout)
@@ -129,6 +184,13 @@ func writePort(w io.Writer, res vminfo.PortResult, tr *i18n.Translator) error {
 }
 
 func runNetPing(ctx context.Context, stdout, stderr io.Writer, args []string, tr *i18n.Translator) error {
+	var err error
+	args, err = reorderNetFlags(args, map[string]bool{
+		"mode": true, "count": true, "timeout": true, "tcp-port": true, "json": false,
+	})
+	if err != nil {
+		return err
+	}
 	fs := flag.NewFlagSet("net ping", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
@@ -147,10 +209,23 @@ func runNetPing(ctx context.Context, stdout, stderr io.Writer, args []string, tr
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("%w: %v", ErrUsage, err)
 	}
 	if fs.NArg() != 1 {
 		return fmt.Errorf("%w: net ping requires exactly one host", ErrUsage)
+	}
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode != "tcp" && mode != "icmp" {
+		return fmt.Errorf("%w: invalid ping mode %q (want tcp or icmp)", ErrUsage, mode)
+	}
+	if count < 1 || count > maxNetProbeCount {
+		return fmt.Errorf("%w: ping count must be between 1 and %d", ErrUsage, maxNetProbeCount)
+	}
+	if timeout <= 0 || timeout > maxNetProbeTimeout {
+		return fmt.Errorf("%w: ping timeout must be > 0 and <= %s", ErrUsage, maxNetProbeTimeout)
+	}
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("%w: invalid tcp port %d (want 1-65535)", ErrUsage, port)
 	}
 
 	res := vminfo.Ping(ctx, fs.Arg(0), vminfo.PingOptions{Mode: mode, Count: count, Timeout: timeout, Port: port})
@@ -178,6 +253,11 @@ func writePing(w io.Writer, res vminfo.PingResult, tr *i18n.Translator) error {
 }
 
 func runNetIP(ctx context.Context, stdout, stderr io.Writer, args []string, tr *i18n.Translator) error {
+	var err error
+	args, err = reorderNetFlags(args, map[string]bool{"server": true, "json": false})
+	if err != nil {
+		return err
+	}
 	fs := flag.NewFlagSet("net ip", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
@@ -190,7 +270,7 @@ func runNetIP(ctx context.Context, stdout, stderr io.Writer, args []string, tr *
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("%w: %v", ErrUsage, err)
 	}
 	if fs.NArg() > 1 {
 		return fmt.Errorf("%w: net ip accepts at most one IP", ErrUsage)

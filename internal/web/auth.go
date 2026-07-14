@@ -51,6 +51,7 @@ func (a *authConfig) wrap(next http.Handler) http.Handler {
 			Value:    queryToken,
 			Path:     "/",
 			HttpOnly: true,
+			Secure:   requestScheme(r) == "https",
 			SameSite: http.SameSiteLaxMode,
 		})
 
@@ -131,15 +132,6 @@ func wantsJSON(r *http.Request) bool {
 func isWebSocketUpgrade(r *http.Request) bool {
 	return strings.EqualFold(strings.TrimSpace(r.Header.Get("Upgrade")), "websocket") &&
 		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
-}
-
-func sameOriginHost(requestHost, originHost string) bool {
-	reqHost, reqPort := splitHostPort(requestHost)
-	originHostOnly, originPort := splitHostPort(originHost)
-	if !strings.EqualFold(reqHost, originHostOnly) {
-		return false
-	}
-	return reqPort == originPort
 }
 
 func splitHostPort(value string) (host, port string) {

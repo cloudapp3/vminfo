@@ -51,6 +51,20 @@ func TestAuthQueryTokenSetsCookieAndRedirects(t *testing.T) {
 	}
 }
 
+func TestAuthQueryTokenSetsSecureCookieForForwardedHTTPS(t *testing.T) {
+	auth := newAuthConfig("secret-token")
+	req := httptest.NewRequest(http.MethodGet, "/?token=secret-token", nil)
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rr := httptest.NewRecorder()
+
+	auth.wrap(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(rr, req)
+
+	cookies := rr.Result().Cookies()
+	if len(cookies) != 1 || !cookies[0].Secure {
+		t.Fatalf("expected one Secure auth cookie, got %#v", cookies)
+	}
+}
+
 func TestAuthCookieAllowsProtectedRoute(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", nil, Options{AuthToken: "secret-token"})
 	handler, err := srv.handler()

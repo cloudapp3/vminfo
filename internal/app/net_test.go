@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -42,7 +43,7 @@ func TestRunNetPortMissingPort(t *testing.T) {
 
 func TestRunNetDNSJSON(t *testing.T) {
 	var out bytes.Buffer
-	if err := runNet(context.Background(), &out, &bytes.Buffer{}, []string{"dns", "--json", "localhost"}, i18n.New("en")); err != nil {
+	if err := runNet(context.Background(), &out, &bytes.Buffer{}, []string{"dns", "localhost", "--json"}, i18n.New("en")); err != nil {
 		t.Fatalf("runNet dns returned error: %v", err)
 	}
 	if !strings.Contains(out.String(), `"domain": "localhost"`) {
@@ -66,12 +67,50 @@ func TestRunNetPingTCPJSON(t *testing.T) {
 	port := ln.Addr().(*net.TCPAddr).Port
 
 	var out bytes.Buffer
-	args := []string{"ping", "--mode", "tcp", "--tcp-port", strconv.Itoa(port), "--count", "2", "--json", "127.0.0.1"}
+	args := []string{"ping", "127.0.0.1", "--mode", "tcp", "--tcp-port", strconv.Itoa(port), "--count", "2", "--json"}
 	if err := runNet(context.Background(), &out, &bytes.Buffer{}, args, i18n.New("en")); err != nil {
 		t.Fatalf("runNet ping returned error: %v", err)
 	}
 	if !strings.Contains(out.String(), `"mode": "tcp"`) || !strings.Contains(out.String(), `"sent": 2`) {
 		t.Fatalf("expected tcp ping JSON, got: %s", out.String())
+	}
+}
+
+func TestRunNetRejectsInvalidProbeOptions(t *testing.T) {
+	tests := [][]string{
+		{"port", "localhost", "0"},
+		{"port", "localhost", "80", "--timeout", "11s"},
+		{"ping", "localhost", "--mode", "bogus"},
+		{"ping", "localhost", "--count", "0"},
+		{"ping", "localhost", "--count", "101"},
+		{"ping", "localhost", "--tcp-port", "0"},
+		{"ping", "localhost", "--timeout", "11s"},
+	}
+	for _, args := range tests {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			err := runNet(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, args, i18n.New("en"))
+			if !errors.Is(err, ErrUsage) {
+				t.Fatalf("runNet(%v) error = %v, want ErrUsage", args, err)
+			}
+		})
+	}
+}
+
+func TestReorderNetFlagsRejectsMissingValue(t *testing.T) {
+	_, err := reorderNetFlags([]string{"example.com", "--server"}, map[string]bool{"server": true})
+	if !errors.Is(err, ErrUsage) {
+		t.Fatalf("reorderNetFlags error = %v, want ErrUsage", err)
+	}
+}
+
+func TestReorderNetFlagsPreservesTerminatorBeforePositionals(t *testing.T) {
+	got, err := reorderNetFlags([]string{"--", "--json", "example.com"}, map[string]bool{"json": false})
+	if err != nil {
+		t.Fatalf("reorderNetFlags returned error: %v", err)
+	}
+	want := []string{"--", "--json", "example.com"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("reorderNetFlags = %v, want %v", got, want)
 	}
 }
 

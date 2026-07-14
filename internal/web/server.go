@@ -7,8 +7,11 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
+	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -43,8 +46,13 @@ type Server struct {
 	addr      string
 	collector *collector.Collector
 	hub       *WSHub
-	server    *http.Server
 	auth      *authConfig
+
+	lifecycleMu     sync.Mutex
+	server          *http.Server
+	cancelBroadcast context.CancelFunc
+	started         bool
+	stopped         bool
 }
 
 // NewServer creates a new web server listening on addr (e.g. "127.0.0.1:20021").
@@ -64,25 +72,69 @@ func (s *Server) Start() error {
 		return err
 	}
 
-	s.server = &http.Server{
-		Addr:    s.addr,
-		Handler: handler,
+	broadcastCtx, cancelBroadcast := context.WithCancel(context.Background())
+	httpServer := newHTTPServer(s.addr, handler)
+
+	s.lifecycleMu.Lock()
+	if s.stopped {
+		s.lifecycleMu.Unlock()
+		cancelBroadcast()
+		return http.ErrServerClosed
+	}
+	if s.started {
+		s.lifecycleMu.Unlock()
+		cancelBroadcast()
+		return fmt.Errorf("web server already started")
+	}
+	s.started = true
+	s.server = httpServer
+	s.cancelBroadcast = cancelBroadcast
+	s.lifecycleMu.Unlock()
+
+	defer func() {
+		cancelBroadcast()
+		s.hub.closeAll()
+		s.lifecycleMu.Lock()
+		s.stopped = true
+		s.cancelBroadcast = nil
+		s.lifecycleMu.Unlock()
+	}()
+	if s.collector != nil {
+		go s.broadcastLoop(broadcastCtx)
 	}
 
-	// Start WS broadcast loop for the lifetime of the HTTP server.
-	broadcastCtx, cancelBroadcast := context.WithCancel(context.Background())
-	defer cancelBroadcast()
-	go s.broadcastLoop(broadcastCtx)
-
-	return s.server.ListenAndServe()
+	return httpServer.ListenAndServe()
 }
 
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
-	if s.server == nil {
+	s.lifecycleMu.Lock()
+	s.stopped = true
+	httpServer := s.server
+	cancelBroadcast := s.cancelBroadcast
+	s.lifecycleMu.Unlock()
+
+	if cancelBroadcast != nil {
+		cancelBroadcast()
+	}
+	if s.hub != nil {
+		s.hub.closeAll()
+	}
+	if httpServer == nil {
 		return nil
 	}
-	return s.server.Shutdown(ctx)
+	return httpServer.Shutdown(ctx)
+}
+
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 }
 
 func (s *Server) handler() (http.Handler, error) {
@@ -114,7 +166,11 @@ func (s *Server) handler() (http.Handler, error) {
 		protectedHandler = s.auth.wrap(protectedHandler)
 	}
 
-	return withCORS(protectedHandler, !s.auth.enabled()), nil
+	handler := requireSameOrigin(protectedHandler)
+	if !s.auth.enabled() {
+		handler = requireLoopbackHost(s.addr, handler)
+	}
+	return handler, nil
 }
 
 func (s *Server) broadcastLoop(ctx context.Context) {
@@ -241,16 +297,30 @@ func (s *Server) handleNetDiag(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requestHasSameOrigin(r) {
+		http.Error(w, "forbidden origin", http.StatusForbidden)
+		return
+	}
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || !strings.EqualFold(mediaType, "application/json") {
+		http.Error(w, "content type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
 	var req NetDiagRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	req.Action = strings.ToLower(strings.TrimSpace(req.Action))
-	req.Target = strings.TrimSpace(req.Target)
-	if req.Target == "" {
-		http.Error(w, "target is required", http.StatusBadRequest)
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	normalizeNetDiagRequest(&req)
+	if err := validateNetDiagRequest(req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -262,11 +332,7 @@ func (s *Server) handleNetDiag(w http.ResponseWriter, r *http.Request) {
 	case "dns":
 		result = vminfo.ResolveDNS(ctx, req.Target, req.Server)
 	case "port":
-		timeout := time.Duration(req.TimeoutMs) * time.Millisecond
-		if timeout <= 0 {
-			timeout = 2 * time.Second
-		}
-		result = vminfo.CheckPort(ctx, req.Target, req.Port, timeout)
+		result = vminfo.CheckPort(ctx, req.Target, req.Port, time.Duration(req.TimeoutMs)*time.Millisecond)
 	case "ping":
 		result = vminfo.Ping(ctx, req.Target, vminfo.PingOptions{
 			Mode:    req.Mode,
@@ -277,10 +343,72 @@ func (s *Server) handleNetDiag(w http.ResponseWriter, r *http.Request) {
 	case "ip":
 		result = vminfo.LookupIP(ctx, req.Target, req.Server)
 	default:
-		http.Error(w, "unknown action (want: dns | port | ping | ip)", http.StatusBadRequest)
+		http.Error(w, "unknown network diagnostic action", http.StatusBadRequest)
 		return
 	}
 	writeJSONGzip(w, r, result)
+}
+
+func normalizeNetDiagRequest(req *NetDiagRequest) {
+	req.Action = strings.ToLower(strings.TrimSpace(req.Action))
+	req.Target = strings.TrimSpace(req.Target)
+	req.Server = strings.TrimSpace(req.Server)
+	req.Mode = strings.ToLower(strings.TrimSpace(req.Mode))
+
+	switch req.Action {
+	case "port":
+		if req.TimeoutMs == 0 {
+			req.TimeoutMs = 2000
+		}
+	case "ping":
+		if req.Count == 0 {
+			req.Count = 4
+		}
+		if req.TimeoutMs == 0 {
+			req.TimeoutMs = 2000
+		}
+		if req.Mode == "" {
+			req.Mode = "tcp"
+		}
+	}
+}
+
+func validateNetDiagRequest(req NetDiagRequest) error {
+	if req.Target == "" {
+		return fmt.Errorf("target is required")
+	}
+
+	switch req.Action {
+	case "dns", "ip":
+		return nil
+	case "port":
+		if req.Port < 1 || req.Port > 65535 {
+			return fmt.Errorf("port must be between 1 and 65535")
+		}
+		if req.TimeoutMs < 1 || req.TimeoutMs > 3000 {
+			return fmt.Errorf("timeout_ms must be between 1 and 3000")
+		}
+		return nil
+	case "ping":
+		if req.Count < 1 || req.Count > 10 {
+			return fmt.Errorf("count must be between 1 and 10")
+		}
+		if req.TimeoutMs < 1 || req.TimeoutMs > 3000 {
+			return fmt.Errorf("timeout_ms must be between 1 and 3000")
+		}
+		if req.Mode != "tcp" && req.Mode != "icmp" {
+			return fmt.Errorf("mode must be tcp or icmp")
+		}
+		if req.Mode == "tcp" && (req.Port < 1 || req.Port > 65535) {
+			return fmt.Errorf("port must be between 1 and 65535 for tcp ping")
+		}
+		if req.Mode == "icmp" && (req.Port < 0 || req.Port > 65535) {
+			return fmt.Errorf("port must be between 1 and 65535 when provided")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown action (want: dns | port | ping | ip)")
+	}
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -294,47 +422,26 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := newWSClient(conn)
-	s.hub.register(client)
+	if !s.hub.tryRegister(client) {
+		_ = client.writeControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "server busy"))
+		client.close()
+		return
+	}
 
 	// Send current snapshot immediately
 	if data := s.collector.LatestJSONWithProcesses(r.Context()); data != nil {
-		if err := client.writeMessage(websocket.TextMessage, data); err != nil {
+		if !client.enqueue(data) {
 			s.hub.unregister(client)
 			return
 		}
 	}
 
-	// Read loop (handles close/ping)
-	for {
-		if _, _, err := conn.ReadMessage(); err != nil {
-			s.hub.unregister(client)
-			break
-		}
-	}
+	go client.writePump(s.hub)
+	client.readPump(s.hub)
 }
 
 func (s *Server) checkWebSocketOrigin(r *http.Request) bool {
-	if !s.auth.enabled() {
-		return true
-	}
-
-	originValue := strings.TrimSpace(r.Header.Get("Origin"))
-	if originValue == "" {
-		return true
-	}
-
-	originURL, err := url.Parse(originValue)
-	if err != nil {
-		return false
-	}
-	return sameOriginHost(r.Host, originURL.Host)
-}
-
-// --- Helpers ---
-
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
+	return requestHasSameOrigin(r)
 }
 
 // writeJSONGzip writes JSON with optional gzip compression.
@@ -354,19 +461,88 @@ func writeJSONGzip(w http.ResponseWriter, r *http.Request, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-func withCORS(next http.Handler, enabled bool) http.Handler {
+func requireSameOrigin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if enabled {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		}
-		if enabled && r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
+		if !requestHasSameOrigin(r) {
+			http.Error(w, "forbidden origin", http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func requireLoopbackHost(listenAddr string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isAllowedLoopbackHost(r.Host, listenAddr) {
+			http.Error(w, "forbidden host", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isAllowedLoopbackHost(requestHost, listenAddr string) bool {
+	_, listenPort, err := net.SplitHostPort(strings.TrimSpace(listenAddr))
+	if err != nil {
+		return false
+	}
+	host, port := splitHostPort(requestHost)
+	if port != "" && listenPort != "" && listenPort != "0" && port != listenPort {
+		return false
+	}
+	host = strings.TrimSuffix(strings.TrimSpace(host), ".")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func requestHasSameOrigin(r *http.Request) bool {
+	originValue := strings.TrimSpace(r.Header.Get("Origin"))
+	if originValue == "" {
+		return true
+	}
+
+	originURL, err := url.Parse(originValue)
+	if err != nil || originURL.Scheme == "" || originURL.Host == "" || originURL.User != nil ||
+		originURL.RawQuery != "" || originURL.Fragment != "" || (originURL.Path != "" && originURL.Path != "/") {
+		return false
+	}
+	expectedScheme := requestScheme(r)
+	if !strings.EqualFold(originURL.Scheme, expectedScheme) {
+		return false
+	}
+	return sameOriginHostWithScheme(r.Host, originURL.Host, expectedScheme)
+}
+
+func requestScheme(r *http.Request) string {
+	if r.TLS != nil {
+		return "https"
+	}
+	if forwarded := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0]); strings.EqualFold(forwarded, "http") || strings.EqualFold(forwarded, "https") {
+		return strings.ToLower(forwarded)
+	}
+	return "http"
+}
+
+func sameOriginHostWithScheme(requestHost, originHost, scheme string) bool {
+	reqHost, reqPort := splitHostPort(requestHost)
+	originHostOnly, originPort := splitHostPort(originHost)
+	if !strings.EqualFold(reqHost, originHostOnly) {
+		return false
+	}
+	defaultPort := "80"
+	if strings.EqualFold(scheme, "https") {
+		defaultPort = "443"
+	}
+	if reqPort == "" {
+		reqPort = defaultPort
+	}
+	if originPort == "" {
+		originPort = defaultPort
+	}
+	return reqPort == originPort
 }
 
 type processQueryOptions struct {
