@@ -122,7 +122,7 @@
             var isIdle = d.read_bytes_sec === 0 && d.write_bytes_sec === 0 && d.iops === 0;
             var cls = isIdle ? ' class="color-muted"' : '';
             html += '<tr' + cls + '>' +
-                '<td>' + d.device + '</td>' +
+                '<td>' + escapeHtml(String(d.device || '')) + '</td>' +
                 '<td style="text-align:right">' + formatBytesPerSec(d.read_bytes_sec) + '</td>' +
                 '<td style="text-align:right">' + formatBytesPerSec(d.write_bytes_sec) + '</td>' +
                 '<td style="text-align:right">' + d.iops + '</td>' +
@@ -413,25 +413,37 @@
 
         dom.procCount.textContent = '(' + list.length + ' shown / ' + totalCount + ' total)';
 
-        var html = '';
+        var fragment = document.createDocumentFragment();
         for (var i = 0; i < list.length; i++) {
             var p = list[i];
             var cpuColor = thresholdColor(p.cpu_percent);
             var memColor = thresholdColor(p.mem_percent);
             var command = p.command || p.name || '';
-            html += '<tr>' +
-                '<td class="col-pid">' + p.pid + '</td>' +
-                '<td class="col-cpu" style="color:' + cpuColor + '">' + p.cpu_percent.toFixed(1) + '</td>' +
-                '<td class="col-mem" style="color:' + memColor + '">' + p.mem_percent.toFixed(1) + '</td>' +
-                '<td class="col-rss">' + formatBytes(p.rss) + '</td>' +
-                '<td class="col-user">' + escapeHtml(p.user || '—') + '</td>' +
-                '<td class="col-status">' + escapeHtml(p.status || '—') + '</td>' +
-                '<td class="col-age">' + formatDuration(p.uptime || 0) + '</td>' +
-                '<td class="col-name" title="' + escapeHtml(command) + '">' + escapeHtml(p.name || '—') + '</td>' +
-                '<td class="col-command" title="' + escapeHtml(command) + '">' + escapeHtml(command || '—') + '</td>' +
-                '</tr>';
+            var row = document.createElement('tr');
+            appendProcessCell(row, 'col-pid', p.pid);
+            appendProcessCell(row, 'col-cpu', Number(p.cpu_percent || 0).toFixed(1), cpuColor);
+            appendProcessCell(row, 'col-mem', Number(p.mem_percent || 0).toFixed(1), memColor);
+            appendProcessCell(row, 'col-rss', formatBytes(p.rss));
+            appendProcessCell(row, 'col-user', p.user || '—');
+            appendProcessCell(row, 'col-status', p.status || '—');
+            appendProcessCell(row, 'col-age', formatDuration(p.uptime || 0));
+            appendProcessCell(row, 'col-name', p.name || '—', '', command);
+            appendProcessCell(row, 'col-command', command || '—', '', command);
+            fragment.appendChild(row);
         }
-        dom.procTbody.innerHTML = html;
+        while (dom.procTbody.firstChild) {
+            dom.procTbody.removeChild(dom.procTbody.firstChild);
+        }
+        dom.procTbody.appendChild(fragment);
+    }
+
+    function appendProcessCell(row, className, value, color, title) {
+        var cell = document.createElement('td');
+        cell.className = className;
+        cell.textContent = String(value);
+        if (color) cell.style.color = color;
+        if (title !== undefined) cell.title = String(title);
+        row.appendChild(cell);
     }
 
     function escapeHtml(str) {

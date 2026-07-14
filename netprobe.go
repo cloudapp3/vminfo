@@ -50,7 +50,8 @@ func ResolveDNS(ctx context.Context, domain, server string) DNSResult {
 		resolver = &net.Resolver{
 			PreferGo: true,
 			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-				return net.Dial(network, target)
+				dialer := net.Dialer{}
+				return dialer.DialContext(ctx, network, target)
 			},
 		}
 	}
@@ -89,10 +90,18 @@ func CheckPort(ctx context.Context, host string, port int, timeout time.Duration
 // PingOptions controls a Ping probe sequence.
 type PingOptions struct {
 	Mode    string        // "tcp" (default) or "icmp"
-	Count   int           // number of probes (default 4)
-	Timeout time.Duration // per-probe timeout (default 1s)
-	Port    int           // tcp mode target port (default 80)
+	Count   int           // number of probes (default 4, maximum 100)
+	Timeout time.Duration // per-probe timeout (default 1s, maximum 10s)
+	Port    int           // tcp mode target port (default 80, range 1..65535)
 }
+
+const (
+	defaultPingCount   = 4
+	maxPingCount       = 100
+	defaultPingTimeout = time.Second
+	maxPingTimeout     = 10 * time.Second
+	defaultPingPort    = 80
+)
 
 // PingResult is the outcome of a Ping probe sequence.
 type PingResult struct {
@@ -113,39 +122,77 @@ type PingResult struct {
 // cross-platform / unprivileged; Mode "icmp" sends ICMP Echo via golang.org/x/net
 // (unprivileged udp4: needs net.ipv4.ping_group_range on Linux, unsupported on Windows).
 func Ping(ctx context.Context, host string, opts PingOptions) PingResult {
-	if opts.Count <= 0 {
-		opts.Count = 4
+	normalized, err := normalizePingOptions(opts)
+	res := PingResult{Host: host, Mode: normalized.Mode}
+	if normalized.Mode == "tcp" {
+		res.Port = normalized.Port
 	}
-	if opts.Timeout <= 0 {
-		opts.Timeout = time.Second
-	}
-	mode := strings.ToLower(strings.TrimSpace(opts.Mode))
-	if mode == "" {
-		mode = "tcp"
-	}
-	res := PingResult{Host: host, Mode: mode}
-
-	if mode == "icmp" {
-		rtts, lost, err := pingICMP(ctx, host, opts.Count, opts.Timeout)
-		if err != nil {
-			res.Err = err.Error()
-			return res
-		}
-		fillPingStats(&res, opts.Count, lost, rtts)
-		return res
-	}
-
-	if opts.Port <= 0 {
-		opts.Port = 80
-	}
-	res.Port = opts.Port
-	rtts, lost, err := pingTCP(ctx, host, opts.Port, opts.Count, opts.Timeout)
 	if err != nil {
 		res.Err = err.Error()
 		return res
 	}
-	fillPingStats(&res, opts.Count, lost, rtts)
+
+	if normalized.Mode == "icmp" {
+		rtts, lost, err := pingICMP(ctx, host, normalized.Count, normalized.Timeout)
+		if err != nil {
+			res.Err = err.Error()
+			return res
+		}
+		fillPingStats(&res, normalized.Count, lost, rtts)
+		return res
+	}
+
+	rtts, lost, err := pingTCP(
+		ctx,
+		host,
+		normalized.Port,
+		normalized.Count,
+		normalized.Timeout,
+	)
+	if err != nil {
+		res.Err = err.Error()
+		return res
+	}
+	fillPingStats(&res, normalized.Count, lost, rtts)
 	return res
+}
+
+func normalizePingOptions(opts PingOptions) (PingOptions, error) {
+	opts.Mode = strings.ToLower(strings.TrimSpace(opts.Mode))
+	if opts.Mode == "" {
+		opts.Mode = "tcp"
+	}
+	if opts.Mode != "tcp" && opts.Mode != "icmp" {
+		return opts, fmt.Errorf("unsupported ping mode %q", opts.Mode)
+	}
+
+	if opts.Count < 0 {
+		return opts, fmt.Errorf("ping count must not be negative")
+	}
+	if opts.Count == 0 {
+		opts.Count = defaultPingCount
+	}
+	if opts.Count > maxPingCount {
+		return opts, fmt.Errorf("ping count must not exceed %d", maxPingCount)
+	}
+
+	if opts.Timeout < 0 {
+		return opts, fmt.Errorf("ping timeout must not be negative")
+	}
+	if opts.Timeout == 0 {
+		opts.Timeout = defaultPingTimeout
+	}
+	if opts.Timeout > maxPingTimeout {
+		return opts, fmt.Errorf("ping timeout must not exceed %s", maxPingTimeout)
+	}
+
+	if opts.Port < 0 || opts.Port > 65535 {
+		return opts, fmt.Errorf("ping port must be between 1 and 65535")
+	}
+	if opts.Mode == "tcp" && opts.Port == 0 {
+		opts.Port = defaultPingPort
+	}
+	return opts, nil
 }
 
 func fillPingStats(res *PingResult, sent, lost int, rtts []float64) {
@@ -161,12 +208,8 @@ func fillPingStats(res *PingResult, sent, lost int, rtts []float64) {
 	mn, mx := rtts[0], rtts[0]
 	sum := 0.0
 	for _, r := range rtts {
-		if r < mn {
-			mn = r
-		}
-		if r > mx {
-			mx = r
-		}
+		mn = min(mn, r)
+		mx = max(mx, r)
 		sum += r
 	}
 	res.MinMs = mn
@@ -179,7 +222,7 @@ func pingTCP(ctx context.Context, host string, port, count int, timeout time.Dur
 	lost := 0
 	dialer := net.Dialer{Timeout: timeout}
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
-	for i := 0; i < count; i++ {
+	for range count {
 		if err := ctx.Err(); err != nil {
 			return rtts, lost, err
 		}
@@ -202,16 +245,24 @@ func pingICMP(ctx context.Context, host string, count int, timeout time.Duration
 		return nil, 0, fmt.Errorf("icmp unavailable (try --mode tcp): %w", err)
 	}
 	defer c.Close()
+	stopClose := context.AfterFunc(ctx, func() {
+		_ = c.Close()
+	})
+	defer stopClose()
 
-	dst, err := net.ResolveIPAddr("ip4", host)
+	addresses, err := net.DefaultResolver.LookupIP(ctx, "ip4", host)
 	if err != nil {
 		return nil, 0, err
 	}
+	if len(addresses) == 0 {
+		return nil, 0, fmt.Errorf("no IPv4 address found for %q", host)
+	}
+	dst := &net.IPAddr{IP: addresses[0]}
 
 	id := os.Getpid() & 0xffff
 	rtts := make([]float64, 0, count)
 	lost := 0
-	for i := 0; i < count; i++ {
+	for i := range count {
 		if err := ctx.Err(); err != nil {
 			return rtts, lost, err
 		}
@@ -226,10 +277,17 @@ func pingICMP(ctx context.Context, host string, count int, timeout time.Duration
 		}
 		start := time.Now()
 		if _, err := c.WriteTo(wb, dst); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return rtts, lost, ctxErr
+			}
 			lost++
 			continue
 		}
-		if err := c.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		deadline := nextProbeDeadline(ctx, time.Now(), timeout)
+		if err := c.SetReadDeadline(deadline); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return rtts, lost, ctxErr
+			}
 			lost++
 			continue
 		}
@@ -237,6 +295,9 @@ func pingICMP(ctx context.Context, host string, count int, timeout time.Duration
 		n, _, err := c.ReadFrom(rb)
 		elapsed := time.Since(start)
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return rtts, lost, ctxErr
+			}
 			lost++
 			continue
 		}
@@ -252,6 +313,14 @@ func pingICMP(ctx context.Context, host string, count int, timeout time.Duration
 		rtts = append(rtts, float64(elapsed.Microseconds())/1000.0)
 	}
 	return rtts, lost, nil
+}
+
+func nextProbeDeadline(ctx context.Context, now time.Time, timeout time.Duration) time.Time {
+	deadline := now.Add(timeout)
+	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
+		return contextDeadline
+	}
+	return deadline
 }
 
 // DefaultIPLookupServer is the default IP geo/ASN lookup service.
