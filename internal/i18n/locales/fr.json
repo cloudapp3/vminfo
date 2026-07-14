@@ -127,7 +127,7 @@
   "enable web dashboard": "activer le tableau de bord web",
   "web dashboard on port N (default 20021)": "tableau de bord web sur le port N (défaut 20021)",
   "web dashboard port (default 20021)": "port du tableau de bord web (défaut 20021)",
-  "bind address (default 127.0.0.1, use 0.0.0.0 for all)": "adresse d’écoute (défaut 127.0.0.1, 0.0.0.0 pour toutes)",
+  "bind address (default 127.0.0.1; non-loopback requires --token)": "adresse d’écoute (défaut 127.0.0.1 ; une adresse non loopback nécessite --token)",
   "refresh interval (default 3s)": "intervalle d’actualisation (défaut 3s)",
   "suppress informational output": "masquer les messages informatifs",
   "protect --web with a token; bare --token generates one": "protéger --web par un jeton ; --token seul en génère un",

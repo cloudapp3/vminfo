@@ -146,3 +146,25 @@ func TestWriteProcessesShowsCommandAndAge(t *testing.T) {
 		t.Fatalf("expected command and age in output, got:\n%s", text)
 	}
 }
+
+func TestWriteProcessesSanitizesTerminalControlsAndFallsBackToName(t *testing.T) {
+	items := []vminfo.ProcessInfo{{
+		PID:     42,
+		Name:    "safe-name",
+		Command: "\x1b]0;malicious-title\a",
+		User:    "root\x1b[31m",
+		State:   "S",
+	}}
+
+	var out bytes.Buffer
+	if err := writeProcesses(&out, items, i18n.New("en")); err != nil {
+		t.Fatalf("writeProcesses returned error: %v", err)
+	}
+	text := out.String()
+	if strings.ContainsAny(text, "\x1b\a") || strings.Contains(text, "malicious-title") {
+		t.Fatalf("process output contains terminal control payload: %q", text)
+	}
+	if !strings.Contains(text, "safe-name") {
+		t.Fatalf("process output did not fall back to sanitized name: %q", text)
+	}
+}

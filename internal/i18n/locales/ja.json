@@ -114,7 +114,7 @@
   "enable web dashboard": "Web ダッシュボードを有効化",
   "web dashboard on port N (default 20021)": "Web ダッシュボードのポート N（既定 20021）",
   "web dashboard port (default 20021)": "Web ダッシュボードのポート（既定 20021）",
-  "bind address (default 127.0.0.1, use 0.0.0.0 for all)": "バインドアドレス（既定 127.0.0.1、全ては 0.0.0.0）",
+  "bind address (default 127.0.0.1; non-loopback requires --token)": "バインドアドレス（既定 127.0.0.1、非ループバックには --token が必要）",
   "refresh interval (default 3s)": "更新間隔（既定 3s）",
   "suppress informational output": "情報出力を抑制",
   "protect --web with a token; bare --token generates one": "token で --web を保護；値なし --token は生成",

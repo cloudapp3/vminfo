@@ -114,7 +114,7 @@
   "enable web dashboard": "включить веб-панель",
   "web dashboard on port N (default 20021)": "веб-панель на порту N (по умолчанию 20021)",
   "web dashboard port (default 20021)": "порт веб-панели (по умолчанию 20021)",
-  "bind address (default 127.0.0.1, use 0.0.0.0 for all)": "адрес привязки (по умолчанию 127.0.0.1, 0.0.0.0 для всех)",
+  "bind address (default 127.0.0.1; non-loopback requires --token)": "адрес привязки (по умолчанию 127.0.0.1; для нелокального адреса требуется --token)",
   "refresh interval (default 3s)": "интервал обновления (по умолчанию 3s)",
   "suppress informational output": "подавлять информационный вывод",
   "protect --web with a token; bare --token generates one": "защитить --web токеном; пустой --token создаёт его",
