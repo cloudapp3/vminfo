@@ -10,11 +10,8 @@ import (
 func compareVersions(a, b string) int {
 	aParts := strings.Split(a, ".")
 	bParts := strings.Split(b, ".")
-	maxLen := len(aParts)
-	if len(bParts) > maxLen {
-		maxLen = len(bParts)
-	}
-	for i := 0; i < maxLen; i++ {
+	maxLen := max(len(aParts), len(bParts))
+	for i := range maxLen {
 		var ai, bi int
 		if i < len(aParts) {
 			ai, _ = strconv.Atoi(aParts[i])
