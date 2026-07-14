@@ -2,7 +2,10 @@
 
 package vminfo
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestDecodeTCPState(t *testing.T) {
 	tests := []struct {
@@ -29,5 +32,18 @@ func TestDecodeTCPState(t *testing.T) {
 		if got := decodeTCPState(tt.hex); got != tt.want {
 			t.Errorf("decodeTCPState(%q) = %q, want %q", tt.hex, got, tt.want)
 		}
+	}
+}
+
+func TestConnectionCountsHonorCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if got := countUDPConnections(ctx); got != 0 {
+		t.Fatalf("countUDPConnections() = %d, want 0 for canceled context", got)
+	}
+	count, states := readTCPStates(ctx)
+	if count != 0 || len(states) != 0 {
+		t.Fatalf("readTCPStates() = (%d, %v), want empty result for canceled context", count, states)
 	}
 }

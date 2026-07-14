@@ -4,16 +4,20 @@ package vminfo
 
 import (
 	"bufio"
+	"context"
 	"os"
 	"strconv"
 	"strings"
 )
 
-func countUDPConnections() uint32 {
-	return countConnsFromFile("/proc/net/udp") + countConnsFromFile("/proc/net/udp6")
+func countUDPConnections(ctx context.Context) uint32 {
+	return countConnsFromFile(ctx, "/proc/net/udp") + countConnsFromFile(ctx, "/proc/net/udp6")
 }
 
-func countConnsFromFile(path string) uint32 {
+func countConnsFromFile(ctx context.Context, path string) uint32 {
+	if ctx.Err() != nil {
+		return 0
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return 0
@@ -23,8 +27,14 @@ func countConnsFromFile(path string) uint32 {
 	var count uint32
 	scanner.Scan() // skip header line
 	for scanner.Scan() {
+		if ctx.Err() != nil {
+			return count
+		}
 		count++
 	}
+	// Best-effort counter: a read error ends the scan early, so return the
+	// partial count rather than failing the whole sample.
+	_ = scanner.Err()
 	return count
 }
 
@@ -32,10 +42,13 @@ func countConnsFromFile(path string) uint32 {
 // returning the total TCP socket count and a per-state distribution keyed by
 // state name (ESTABLISHED, TIME_WAIT, ...). countTCPConnections reuses this so
 // the kernel table files are read once per sample, not twice.
-func readTCPStates() (uint32, map[string]uint32) {
+func readTCPStates(ctx context.Context) (uint32, map[string]uint32) {
 	var count uint32
 	states := make(map[string]uint32)
 	for _, path := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
+		if ctx.Err() != nil {
+			return count, states
+		}
 		f, err := os.Open(path)
 		if err != nil {
 			continue
@@ -43,6 +56,10 @@ func readTCPStates() (uint32, map[string]uint32) {
 		scanner := bufio.NewScanner(f)
 		scanner.Scan() // skip header line
 		for scanner.Scan() {
+			if ctx.Err() != nil {
+				f.Close()
+				return count, states
+			}
 			fields := strings.Fields(scanner.Text())
 			if len(fields) < 4 {
 				continue
@@ -52,6 +69,9 @@ func readTCPStates() (uint32, map[string]uint32) {
 				states[name]++
 			}
 		}
+		// Best-effort: keep the partial state counts collected before any read
+		// error rather than failing the sample.
+		_ = scanner.Err()
 		f.Close()
 	}
 	return count, states

@@ -164,9 +164,7 @@ func BuildSnapshot(
 		var sum float64
 		for _, v := range stats.CPUPerCore {
 			sum += v
-			if v > maxCore {
-				maxCore = v
-			}
+			maxCore = max(maxCore, v)
 		}
 		avgCore = sum / float64(len(stats.CPUPerCore))
 	}
