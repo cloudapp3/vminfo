@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/cloudapp3/vminfo"
+	"github.com/cloudapp3/vminfo/internal/textsafe"
 )
 
 // ── Styles & Constants ────────────────────────────────────────────────
@@ -63,7 +64,7 @@ func (m Model) View() string {
 func (m Model) renderMain() string {
 	// Header bar
 	host := lipgloss.NewStyle().Bold(true).Foreground(CText).Render(
-		" vminfo " + firstNonEmpty(m.static.Hostname, "-"),
+		" vminfo " + terminalText(m.static.Hostname, "-"),
 	)
 	stateBadge := m.renderBadge(m.stateLabel(), m.stateColor())
 	pageBadge := m.renderBadge(m.pageLabel(), CBlue)
@@ -154,11 +155,11 @@ func (m Model) renderOverview() string {
 // renderSystemOneLine produces a single-line system summary for tight layouts.
 func (m Model) renderSystemOneLine(width int) string {
 	parts := []string{}
-	if h := strings.TrimSpace(m.static.Hostname); h != "" {
+	if h := terminalText(m.static.Hostname); h != "" {
 		parts = append(parts, valueStyle.Render(h))
 	}
-	if v := strings.TrimSpace(firstNonEmpty(m.static.Platform, m.static.OS, "")); v != "" {
-		ver := strings.TrimSpace(m.static.OSVersion)
+	if v := terminalText(m.static.Platform, m.static.OS); v != "" {
+		ver := terminalText(m.static.OSVersion)
 		if ver != "" {
 			v += " " + ver
 		}
@@ -178,15 +179,19 @@ func (m Model) renderSystemOneLine(width int) string {
 func (m Model) renderSystemContent() string {
 	sysW := sysInnerWidth(m.width)
 	valW := max(sysW-labelW-2, 10)
+	osText := strings.TrimSpace(strings.Join([]string{
+		terminalText(m.static.Platform, m.static.OS, "-"),
+		terminalText(m.static.OSVersion),
+	}, " "))
 
 	lines := []string{
 		m.panelTitle("System"),
 		"",
-		m.kv("OS", truncate(firstNonEmpty(m.static.Platform, m.static.OS, "-")+" "+strings.TrimSpace(m.static.OSVersion), valW)),
-		m.kv("Kernel", truncate(firstNonEmpty(m.static.Kernel, "-"), valW)),
-		m.kv("Arch", firstNonEmpty(m.static.Arch, "-")),
-		m.kv("Host", firstNonEmpty(m.static.Hostname, "-")),
-		m.kv("CPU", truncate(fmt.Sprintf("%s ("+m.tr.T("%d cores")+")", firstNonEmpty(m.static.CPUModel, "-"), m.static.CPUCores), valW)),
+		m.kv("OS", truncate(osText, valW)),
+		m.kv("Kernel", truncate(terminalText(m.static.Kernel, "-"), valW)),
+		m.kv("Arch", terminalText(m.static.Arch, "-")),
+		m.kv("Host", terminalText(m.static.Hostname, "-")),
+		m.kv("CPU", truncate(fmt.Sprintf("%s ("+m.tr.T("%d cores")+")", terminalText(m.static.CPUModel, "-"), m.static.CPUCores), valW)),
 	}
 	if v := firstNonEmpty(m.static.Virtualization, ""); v != "" && v != "-" {
 		lines = append(lines, m.kv("Virt", v))
@@ -196,41 +201,6 @@ func (m Model) renderSystemContent() string {
 			m.label("Uptime")+lipgloss.NewStyle().Foreground(CGreen).Render(formatUptime(m.stats.Uptime)),
 			m.kv("Procs", fmt.Sprintf("%d", m.stats.ProcessCount)),
 		)
-	}
-	return strings.Join(lines, "\n")
-}
-
-func (m Model) renderCPUContent() string {
-	lines := []string{
-		m.panelTitle("CPU"),
-		"",
-	}
-
-	if len(m.cpuHistory) > 1 {
-		sparkW := max(m.width/3, 30)
-		spark := renderSparkline(m.cpuHistory, sparkW)
-		lines = append(lines, spark)
-
-		cur := m.cpuHistory[len(m.cpuHistory)-1]
-		statsLine := subtleStyle.Render("  cur ") + colorizePercent(cur) +
-			subtleStyle.Render("  "+m.tr.T("avg")+" ") + colorizePercent(avgFloat64(m.cpuHistory)) +
-			subtleStyle.Render("  "+m.tr.T("max")+" ") + colorizePercent(maxFloat64(m.cpuHistory))
-		lines = append(lines, statsLine)
-	} else {
-		lines = append(lines, subtleStyle.Render(m.tr.T("Collecting...")))
-	}
-
-	if m.hasStats {
-		var extras []string
-		if len(m.stats.Temps) > 0 {
-			t := m.stats.Temps[0]
-			tc := colorForTempEnhanced(t.Temperature)
-			extras = append(extras, lipgloss.NewStyle().Foreground(tc).Bold(true).Render(
-				fmt.Sprintf("%.0f°C", t.Temperature)))
-		}
-		if len(extras) > 0 {
-			lines = append(lines, subtleStyle.Render("  ")+strings.Join(extras, subtleStyle.Render("  ")))
-		}
 	}
 	return strings.Join(lines, "\n")
 }
@@ -292,7 +262,7 @@ func (m Model) renderResourceContent() string {
 		limit := min(len(m.stats.CPUPerCore), 16)
 		isCompact := len(m.stats.CPUPerCore) > 8
 		chars := make([]string, 0, limit)
-		for i := 0; i < limit; i++ {
+		for i := range limit {
 			chars = append(chars, miniBar(m.stats.CPUPerCore[i]))
 		}
 		sep := " "
@@ -322,10 +292,7 @@ func (m Model) renderResourceContent() string {
 	}
 
 	// ─── Equalize line count ───
-	maxLines := len(leftLines)
-	if len(rightLines) > maxLines {
-		maxLines = len(rightLines)
-	}
+	maxLines := max(len(leftLines), len(rightLines))
 	for len(leftLines) < maxLines {
 		leftLines = append(leftLines, "")
 	}
@@ -335,7 +302,7 @@ func (m Model) renderResourceContent() string {
 
 	// ─── Build body lines ───
 	bodyLines := []string{""}
-	for i := 0; i < maxLines; i++ {
+	for i := range maxLines {
 		left := lipgloss.NewStyle().Width(leftW).Render(leftLines[i])
 		sepChar := lipgloss.NewStyle().Foreground(CBorder).Render("\u2502")
 		right := rightLines[i]
@@ -550,11 +517,11 @@ func (m Model) renderNetworkInterfaces() string {
 			"  ",
 			padRight("IFACE", ifaceW+2, false),
 			padRight("IP", ipW, false),
-			padLeft("RX/s", rxW, false),
-			padLeft("TX/s", txW, false),
+			padLeft("RX/s", rxW),
+			padLeft("TX/s", txW),
 		}
 		if showTotal {
-			headers = append(headers, padLeft("TOTAL RX", totalW, false), padLeft("TOTAL TX", totalW, false))
+			headers = append(headers, padLeft("TOTAL RX", totalW), padLeft("TOTAL TX", totalW))
 		}
 		lines = append(lines, subtleStyle.Render(strings.Join(headers, "")))
 	}
@@ -592,8 +559,8 @@ func (m Model) renderNetworkInterfaces() string {
 			ipStyle = lipgloss.NewStyle().Foreground(CInfo).Bold(true)
 		}
 
-		rxText := lipgloss.NewStyle().Foreground(CBrightGreen).Render("↓ " + padLeft(formatBytes(iface.RxSpeed)+"/s", rxW-2, false))
-		txText := lipgloss.NewStyle().Foreground(CPink).Render("↑ " + padLeft(formatBytes(iface.TxSpeed)+"/s", txW-2, false))
+		rxText := lipgloss.NewStyle().Foreground(CBrightGreen).Render("↓ " + padLeft(formatBytes(iface.RxSpeed)+"/s", rxW-2))
+		txText := lipgloss.NewStyle().Foreground(CPink).Render("↑ " + padLeft(formatBytes(iface.TxSpeed)+"/s", txW-2))
 
 		if compact {
 			line := "  " + dot + " " + rowStyle.Render(padRight(name, ifaceW, false)) + ipStyle.Render(ipText) + " " + rxText + " " + txText
@@ -611,8 +578,8 @@ func (m Model) renderNetworkInterfaces() string {
 		}
 		if showTotal {
 			parts = append(parts,
-				" "+rowStyle.Render(padLeft(formatBytes(iface.RxBytes), totalW, false)),
-				" "+rowStyle.Render(padLeft(formatBytes(iface.TxBytes), totalW, false)),
+				" "+rowStyle.Render(padLeft(formatBytes(iface.RxBytes), totalW)),
+				" "+rowStyle.Render(padLeft(formatBytes(iface.TxBytes), totalW)),
 			)
 		}
 		line := strings.Join(parts, "")
@@ -624,7 +591,7 @@ func (m Model) renderNetworkInterfaces() string {
 		if compact {
 			lines = append(lines, idleStyle.Render(label))
 		} else if showTotal {
-			lines = append(lines, idleStyle.Render(label+padLeft("", max(0, ifaceW+ipW+rxW+txW-15), false)+padLeft(formatBytes(foldedRx), totalW+1, false)+padLeft(formatBytes(foldedTx), totalW+1, false)))
+			lines = append(lines, idleStyle.Render(label+padLeft("", max(0, ifaceW+ipW+rxW+txW-15))+padLeft(formatBytes(foldedRx), totalW+1)+padLeft(formatBytes(foldedTx), totalW+1)))
 		} else {
 			lines = append(lines, idleStyle.Render(label))
 		}
@@ -700,7 +667,7 @@ func padRight(value string, width int, styled bool) string {
 	return value + strings.Repeat(" ", width-len(runes))
 }
 
-func padLeft(value string, width int, styled bool) string {
+func padLeft(value string, width int) string {
 	if width <= 0 {
 		return ""
 	}
@@ -814,9 +781,7 @@ func equalizeContent(contents ...string) []string {
 	for i, c := range contents {
 		lines := strings.Split(c, "\n")
 		split[i] = lines
-		if len(lines) > maxLines {
-			maxLines = len(lines)
-		}
+		maxLines = max(maxLines, len(lines))
 	}
 	result := make([]string, len(contents))
 	for i, lines := range split {
@@ -857,12 +822,12 @@ func (m Model) kv(key, value string) string {
 
 // depthColor returns a dimmer text color based on tree depth.
 func depthColor(depth int) lipgloss.Color {
-	switch {
-	case depth == 0:
+	switch depth {
+	case 0:
 		return CText
-	case depth == 1:
+	case 1:
 		return lipgloss.Color("#a0a8c0")
-	case depth == 2:
+	case 2:
 		return lipgloss.Color("#8088a0")
 	default:
 		return CDim
@@ -911,7 +876,7 @@ func (m Model) renderProcessTree() string {
 					fmt.Sprintf("%5.1f  ", node.proc.MemoryPercent)) +
 				subtleStyle.Render(prefix) +
 				lipgloss.NewStyle().Foreground(connectorColor).Render(connector) +
-				lipgloss.NewStyle().Foreground(nameColor).Render(firstNonEmpty(node.proc.Name, "-"))
+				lipgloss.NewStyle().Foreground(nameColor).Render(terminalText(node.proc.Name, "-"))
 			if rowIndex == selectedIndex {
 				line = lipgloss.NewStyle().Background(selectedBg).Width(innerW).Render(line)
 			} else {
@@ -943,13 +908,13 @@ func (m Model) renderProcessTree() string {
 			stateColor = CCritical
 		}
 		infoLine = subtleStyle.Render("  "+m.tr.T("PID:")) + lipgloss.NewStyle().Foreground(CInfo).Render(fmt.Sprintf(" %d", selected.PID)) +
-			subtleStyle.Render("  "+m.tr.T("Name:")) + lipgloss.NewStyle().Foreground(CText).Bold(true).Render(" "+firstNonEmpty(selected.Name, "-")) +
-			subtleStyle.Render("  "+m.tr.T("State:")) + lipgloss.NewStyle().Foreground(stateColor).Render(" "+firstNonEmpty(selected.State, "-")) +
+			subtleStyle.Render("  "+m.tr.T("Name:")) + lipgloss.NewStyle().Foreground(CText).Bold(true).Render(" "+terminalText(selected.Name, "-")) +
+			subtleStyle.Render("  "+m.tr.T("State:")) + lipgloss.NewStyle().Foreground(stateColor).Render(" "+terminalText(selected.State, "-")) +
 			subtleStyle.Render("  "+m.tr.T("CPU:")) + lipgloss.NewStyle().Foreground(ThresholdColor(selected.CPUPercent)).Render(fmt.Sprintf(" %.1f%%", selected.CPUPercent)) +
 			subtleStyle.Render("  "+m.tr.T("Mem:")) + lipgloss.NewStyle().Foreground(ThresholdColor(float64(selected.MemoryPercent))).Render(fmt.Sprintf(" %.1f%%", selected.MemoryPercent)) +
 			subtleStyle.Render("  "+m.tr.T("RSS:")) + lipgloss.NewStyle().Foreground(CDim).Render(" "+formatBytes(selected.RSSBytes)) +
 			subtleStyle.Render("  "+m.tr.T("Age:")) + lipgloss.NewStyle().Foreground(CDim).Render(" "+formatUptime(selected.Uptime)) +
-			subtleStyle.Render("  "+m.tr.T("Cmd:")) + lipgloss.NewStyle().Foreground(CDim).Render(" "+truncate(firstNonEmpty(selected.Command, selected.Name, "-"), 80))
+			subtleStyle.Render("  "+m.tr.T("Cmd:")) + lipgloss.NewStyle().Foreground(CDim).Render(" "+truncate(terminalText(selected.Command, selected.Name, "-"), 80))
 	}
 
 	allLines := append(headerLines, rowLines...)
@@ -1007,13 +972,10 @@ func (m Model) renderProcesses() string {
 	colGap := 2
 	colUser := 4 // minimum for "USER" header
 	for _, item := range items {
-		if u := firstNonEmpty(item.User, "-"); len(u) > colUser {
-			colUser = len(u)
-		}
+		u := terminalText(item.User, "-")
+		colUser = max(colUser, len(u))
 	}
-	if colUser > 16 {
-		colUser = 16
-	}
+	colUser = min(colUser, 16)
 	fixedW := 4 + colPID + colCPU + colMEM + colRSS + colUser + colGap*6 // sel marker + gaps
 	colName := max(innerW-fixedW, 12)
 
@@ -1072,9 +1034,9 @@ func (m Model) renderProcesses() string {
 
 		rssS := lipgloss.NewStyle().Foreground(CDim).Width(colRSS).Render(formatBytes(item.RSSBytes))
 
-		userS := lipgloss.NewStyle().Foreground(CDim).Width(colUser).Render(truncate(firstNonEmpty(item.User, "-"), colUser))
+		userS := lipgloss.NewStyle().Foreground(CDim).Width(colUser).Render(truncate(terminalText(item.User, "-"), colUser))
 
-		nameS := lipgloss.NewStyle().Foreground(CText).Width(colName).Render(truncate(firstNonEmpty(item.Name, "-"), colName))
+		nameS := lipgloss.NewStyle().Foreground(CText).Width(colName).Render(truncate(terminalText(item.Name, "-"), colName))
 
 		gap := strings.Repeat(" ", colGap)
 		row := " " + marker + " " + pidS + gap + cpuS + gap + memS + gap + rssS + gap + userS + gap + nameS
@@ -1112,15 +1074,15 @@ func (m Model) renderProcesses() string {
 			stateColor = CCritical
 		}
 		infoLine = subtleStyle.Render("  "+m.tr.T("PID:")) + lipgloss.NewStyle().Foreground(CInfo).Render(fmt.Sprintf(" %d", selected.PID)) +
-			subtleStyle.Render("  "+m.tr.T("Name:")) + lipgloss.NewStyle().Foreground(CText).Bold(true).Render(" "+firstNonEmpty(selected.Name, "-")) +
-			subtleStyle.Render("  "+m.tr.T("State:")) + lipgloss.NewStyle().Foreground(stateColor).Render(" "+firstNonEmpty(selected.State, "-")) +
+			subtleStyle.Render("  "+m.tr.T("Name:")) + lipgloss.NewStyle().Foreground(CText).Bold(true).Render(" "+terminalText(selected.Name, "-")) +
+			subtleStyle.Render("  "+m.tr.T("State:")) + lipgloss.NewStyle().Foreground(stateColor).Render(" "+terminalText(selected.State, "-")) +
 			subtleStyle.Render("  "+m.tr.T("CPU:")) + lipgloss.NewStyle().Foreground(ThresholdColor(selected.CPUPercent)).Render(fmt.Sprintf(" %.1f%%", selected.CPUPercent)) +
 			subtleStyle.Render("  "+m.tr.T("Mem:")) + lipgloss.NewStyle().Foreground(ThresholdColor(float64(selected.MemoryPercent))).Render(fmt.Sprintf(" %.1f%%", selected.MemoryPercent)) +
 			subtleStyle.Render("  "+m.tr.T("RSS:")) + lipgloss.NewStyle().Foreground(CDim).Render(" "+formatBytes(selected.RSSBytes)) +
 			subtleStyle.Render("  "+m.tr.T("Age:")) + lipgloss.NewStyle().Foreground(CDim).Render(" "+formatUptime(selected.Uptime)) +
 			subtleStyle.Render("  "+m.tr.T("Threads:")) + lipgloss.NewStyle().Foreground(CDim).Render(fmt.Sprintf(" %d", selected.Threads)) +
 			subtleStyle.Render("  "+m.tr.T("Nice:")) + lipgloss.NewStyle().Foreground(CDim).Render(fmt.Sprintf(" %d", selected.Nice)) +
-			subtleStyle.Render("  "+m.tr.T("Cmd:")) + lipgloss.NewStyle().Foreground(CDim).Render(" "+truncate(firstNonEmpty(selected.Command, selected.Name, "-"), 100))
+			subtleStyle.Render("  "+m.tr.T("Cmd:")) + lipgloss.NewStyle().Foreground(CDim).Render(" "+truncate(terminalText(selected.Command, selected.Name, "-"), 100))
 	}
 
 	// Build viewport content: header + all rows
@@ -1183,9 +1145,9 @@ func (m Model) renderKillConfirm() string {
 	pidLabel := subtleStyle.Render(m.tr.T("PID:"))
 	pidVal := lipgloss.NewStyle().Foreground(CInfo).Bold(true).Render(fmt.Sprintf("%d", target.PID))
 	nameLabel := subtleStyle.Render(m.tr.T("Name:"))
-	nameVal := valueStyle.Render(firstNonEmpty(target.Name, "-"))
+	nameVal := valueStyle.Render(terminalText(target.Name, "-"))
 	userLabel := subtleStyle.Render(m.tr.T("User:"))
-	userVal := lipgloss.NewStyle().Foreground(CDim).Render(firstNonEmpty(target.User, "-"))
+	userVal := lipgloss.NewStyle().Foreground(CDim).Render(terminalText(target.User, "-"))
 
 	body := []string{
 		title,
@@ -1331,6 +1293,16 @@ func firstNonEmpty(values ...string) string {
 		v = strings.TrimSpace(v)
 		if v != "" {
 			return v
+		}
+	}
+	return ""
+}
+
+func terminalText(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(textsafe.Terminal(value))
+		if value != "" {
+			return value
 		}
 	}
 	return ""
