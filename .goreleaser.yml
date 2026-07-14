@@ -63,13 +63,35 @@ release:
   draft: false
   prerelease: auto
   mode: replace
+  header: |
+    {{ .ProjectName }} {{ .Tag }} is a cross-platform terminal system monitor with JSON output, a web dashboard, network diagnostics, and embeddable Go APIs.
+
+    ## Changes
+  footer: |
+    ## Install or upgrade
+
+    Linux and macOS:
+
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/cloudapp3/vminfo/main/install.sh | sudo bash -s -- --dir /usr/local/bin
+    ```
+
+    Existing Linux and macOS release builds can upgrade with:
+
+    ```bash
+    vminfo update --version {{ .Tag }}
+    ```
+
+    Download archives and Linux packages from the assets below. Verify downloads against `checksums.txt` before installation.
+
+    [Documentation](https://vminfo.bestcheapvps.org) · [Quick start](https://vminfo.bestcheapvps.org/guide/quick-start) · [Command reference](https://vminfo.bestcheapvps.org/commands/) · [Compare releases](https://github.com/cloudapp3/vminfo/releases)
 
 nfpms:
   - id: packages
     package_name: vminfo
     maintainer: cloudapp3
-    description: Host runtime information toolkit
-    homepage: https://github.com/cloudapp3/vminfo
+    description: Terminal system monitor with JSON output and a web dashboard
+    homepage: https://vminfo.bestcheapvps.org
     license: MIT
     formats:
       - deb
