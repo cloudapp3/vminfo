@@ -41,8 +41,9 @@ Thanks for helping improve vminfo. Bug reports, feature ideas, documentation imp
 git clone https://github.com/cloudapp3/vminfo.git
 cd vminfo
 go test ./...
+go test -race ./...
 go vet ./...
-go run ./cmd/vminfo version --json
+go run ./cmd/vminfo version
 go run ./cmd/vminfo summary --json
 go run ./cmd/vminfo watch --count 1
 go run ./cmd/vminfo ps # Linux-only
@@ -58,6 +59,7 @@ Notes:
 - [ ] The change is focused and clearly described
 - [ ] Modified Go files have been formatted with `gofmt -w`
 - [ ] `go test ./...` passes
+- [ ] `go test -race ./...` passes
 - [ ] `go vet ./...` passes
 - [ ] README / docs / tests were updated when behavior changed
 - [ ] No unrelated files were reverted
