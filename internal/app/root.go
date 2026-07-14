@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/cloudapp3/vminfo"
 	"github.com/cloudapp3/vminfo/internal/collector"
 	"github.com/cloudapp3/vminfo/internal/i18n"
+	"github.com/cloudapp3/vminfo/internal/textsafe"
 	"github.com/cloudapp3/vminfo/internal/updater"
 	"github.com/cloudapp3/vminfo/internal/web"
 	vminfotui "github.com/cloudapp3/vminfo/tui"
@@ -35,6 +37,13 @@ var ErrUsage = errors.New("usage")
 // minPSWatchInterval bounds --watch polling so a typo like --interval 0 does
 // not turn into a tight loop that re-reads all of /proc on every iteration.
 const minPSWatchInterval = 500 * time.Millisecond
+
+const (
+	defaultWebBind     = "127.0.0.1"
+	defaultWebPort     = 20021
+	defaultWebInterval = 3 * time.Second
+	updateCleanupWait  = 250 * time.Millisecond
+)
 
 type watchSnapshot struct {
 	CollectedAt time.Time           `json:"collected_at"`
@@ -58,127 +67,284 @@ type psOptions struct {
 	count    int
 }
 
-func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	stdout = defaultWriter(stdout)
-	stderr = defaultWriter(stderr)
+type globalOptions struct {
+	lang              string
+	web               bool
+	webPort           int
+	webBind           string
+	webToken          string
+	webTokenRequested bool
+	tui               bool
+	silent            bool
+	noUpdateCheck     bool
+	webInterval       time.Duration
+	webOptionSeen     bool
+}
 
-	// Pre-scan global flags (--lang, --web, --port, --bind, --token, --tui, --interval, --silent, --no-update-check)
-	langFlag := ""
-	webMode := false
-	webPort := 20021
-	webBind := "127.0.0.1"
-	webTokenFlag := ""
-	webTokenRequested := false
-	tuiMode := false
-	silent := false
-	noUpdateCheck := os.Getenv("VMINFO_NO_UPDATE_CHECK") != ""
-	webInterval := 3 * time.Second
-	filtered := make([]string, 0, len(args))
+type synchronizedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (w *synchronizedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.w.Write(p)
+}
+
+func parseGlobalOptions(args []string) (globalOptions, []string, error) {
+	opts := globalOptions{
+		webPort:       defaultWebPort,
+		webBind:       defaultWebBind,
+		webInterval:   defaultWebInterval,
+		noUpdateCheck: os.Getenv("VMINFO_NO_UPDATE_CHECK") != "",
+	}
+
+	globalArgs := args
+	if terminator := slices.Index(args, "--"); terminator >= 0 {
+		globalArgs = args[:terminator]
+	}
+	webRequested := slices.Contains(globalArgs, "--web")
+	remaining := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		switch {
-		case strings.HasPrefix(args[i], "--lang="):
-			langFlag = strings.TrimPrefix(args[i], "--lang=")
-		case args[i] == "--lang" && i+1 < len(args):
-			langFlag = args[i+1]
-			i++
-		case args[i] == "--web":
-			webMode = true
-		case strings.HasPrefix(args[i], "--port="):
-			if p, err := strconv.Atoi(strings.TrimPrefix(args[i], "--port=")); err == nil && p > 0 && p < 65536 {
-				webPort = p
+		case arg == "--":
+			if len(remaining) > 0 {
+				remaining = append(remaining, arg)
 			}
-		case args[i] == "--port" && i+1 < len(args):
-			if p, err := strconv.Atoi(args[i+1]); err == nil && p > 0 && p < 65536 {
-				webPort = p
+			remaining = append(remaining, args[i+1:]...)
+			i = len(args)
+		case arg == "--web":
+			opts.web = true
+		case strings.HasPrefix(arg, "--lang="):
+			opts.lang = strings.TrimSpace(strings.TrimPrefix(arg, "--lang="))
+			if opts.lang == "" {
+				return globalOptions{}, nil, fmt.Errorf("%w: --lang requires a value", ErrUsage)
 			}
-			i++
-		case strings.HasPrefix(args[i], "--bind="):
-			webBind = strings.TrimPrefix(args[i], "--bind=")
-		case args[i] == "--bind" && i+1 < len(args):
-			webBind = args[i+1]
-			i++
-		case strings.HasPrefix(args[i], "--token="):
-			webTokenRequested = true
-			webTokenFlag = strings.TrimPrefix(args[i], "--token=")
-		case args[i] == "--token":
-			webTokenRequested = true
-			// --token without a value means auto-generate
+		case arg == "--lang":
+			value, next, err := requiredOptionValue(args, i, "--lang")
+			if err != nil {
+				return globalOptions{}, nil, err
+			}
+			opts.lang = value
+			i = next
+		case strings.HasPrefix(arg, "--port="):
+			port, err := parseWebPort(strings.TrimPrefix(arg, "--port="))
+			if err != nil {
+				return globalOptions{}, nil, err
+			}
+			opts.webPort = port
+			opts.webOptionSeen = true
+		case arg == "--port":
+			value, next, err := requiredOptionValue(args, i, "--port")
+			if err != nil {
+				return globalOptions{}, nil, err
+			}
+			port, err := parseWebPort(value)
+			if err != nil {
+				return globalOptions{}, nil, err
+			}
+			opts.webPort = port
+			opts.webOptionSeen = true
+			i = next
+		case strings.HasPrefix(arg, "--bind="):
+			opts.webBind = strings.TrimSpace(strings.TrimPrefix(arg, "--bind="))
+			if opts.webBind == "" {
+				return globalOptions{}, nil, fmt.Errorf("%w: --bind requires a non-empty address", ErrUsage)
+			}
+			opts.webOptionSeen = true
+		case arg == "--bind":
+			value, next, err := requiredOptionValue(args, i, "--bind")
+			if err != nil {
+				return globalOptions{}, nil, err
+			}
+			opts.webBind = value
+			opts.webOptionSeen = true
+			i = next
+		case strings.HasPrefix(arg, "--token="):
+			opts.webTokenRequested = true
+			opts.webToken = strings.TrimSpace(strings.TrimPrefix(arg, "--token="))
+			opts.webOptionSeen = true
+		case arg == "--token":
+			opts.webTokenRequested = true
+			opts.webOptionSeen = true
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				webTokenFlag = args[i+1]
+				opts.webToken = strings.TrimSpace(args[i+1])
 				i++
 			}
-		case args[i] == "--tui":
-			tuiMode = true
-		case args[i] == "--silent", args[i] == "-s":
-			silent = true
-		case webMode && strings.HasPrefix(args[i], "--interval="):
-			if d, err := time.ParseDuration(strings.TrimPrefix(args[i], "--interval=")); err == nil {
-				webInterval = d
+		case arg == "--tui":
+			opts.tui = true
+			opts.webOptionSeen = true
+		case arg == "--silent" || arg == "-s":
+			opts.silent = true
+		case webRequested && strings.HasPrefix(arg, "--interval="):
+			interval, err := parseWebInterval(strings.TrimPrefix(arg, "--interval="))
+			if err != nil {
+				return globalOptions{}, nil, err
 			}
-		case webMode && args[i] == "--interval" && i+1 < len(args):
-			if d, err := time.ParseDuration(args[i+1]); err == nil {
-				webInterval = d
+			opts.webInterval = interval
+			opts.webOptionSeen = true
+		case webRequested && arg == "--interval":
+			value, next, err := requiredOptionValue(args, i, "--interval")
+			if err != nil {
+				return globalOptions{}, nil, err
 			}
-			i++
-		case args[i] == "--no-update-check":
-			noUpdateCheck = true
+			interval, err := parseWebInterval(value)
+			if err != nil {
+				return globalOptions{}, nil, err
+			}
+			opts.webInterval = interval
+			opts.webOptionSeen = true
+			i = next
+		case arg == "--no-update-check":
+			opts.noUpdateCheck = true
 		default:
-			filtered = append(filtered, args[i])
+			remaining = append(remaining, arg)
 		}
 	}
-	args = filtered
+
+	if !opts.web && opts.webOptionSeen {
+		return globalOptions{}, nil, fmt.Errorf("%w: web options require --web", ErrUsage)
+	}
+	return opts, remaining, nil
+}
+
+func requiredOptionValue(args []string, index int, name string) (string, int, error) {
+	if index+1 >= len(args) || strings.HasPrefix(args[index+1], "-") {
+		return "", index, fmt.Errorf("%w: %s requires a value", ErrUsage, name)
+	}
+	value := strings.TrimSpace(args[index+1])
+	if value == "" {
+		return "", index, fmt.Errorf("%w: %s requires a value", ErrUsage, name)
+	}
+	return value, index + 1, nil
+}
+
+func parseWebPort(raw string) (int, error) {
+	port, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || port < 1 || port > 65535 {
+		return 0, fmt.Errorf("%w: invalid web port %q (want 1-65535)", ErrUsage, raw)
+	}
+	return port, nil
+}
+
+func parseWebInterval(raw string) (time.Duration, error) {
+	interval, err := time.ParseDuration(strings.TrimSpace(raw))
+	if err != nil || interval <= 0 {
+		return 0, fmt.Errorf("%w: invalid web interval %q (want a positive duration)", ErrUsage, raw)
+	}
+	return interval, nil
+}
+
+func normalizeWebBind(bind string) string {
+	return strings.Trim(strings.TrimSpace(bind), "[]")
+}
+
+func validateWebExposure(bind, token string) error {
+	host := normalizeWebBind(bind)
+	if host == "" {
+		return fmt.Errorf("%w: --bind requires a non-empty address", ErrUsage)
+	}
+	if strings.EqualFold(host, "localhost") {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	if strings.TrimSpace(token) == "" {
+		return fmt.Errorf("%w: non-loopback web bind %q requires --token", ErrUsage, bind)
+	}
+	return nil
+}
+
+func startBackgroundUpdateCheck(ctx context.Context, stderr io.Writer, tr *i18n.Translator, meta vminfo.AppMetadata) func() {
+	checkCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	token := updateTokenFromEnv()
+	go func() {
+		defer close(done)
+		u := newUpdateClient(updater.Config{
+			Repo:        defaultUpdateRepo(meta),
+			CurrentVer:  meta.Version,
+			GitHubToken: token,
+		})
+		result, err := u.CheckForUpdate(checkCtx)
+		if checkCtx.Err() != nil || err != nil || result == nil || !result.UpdateAvailable {
+			return
+		}
+		msg := fmt.Sprintf(tr.T("A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.")+"\n",
+			formatReleaseTag(result.LatestVersion), formatReleaseTag(result.CurrentVersion))
+		_, _ = fmt.Fprint(stderr, msg)
+	}()
+	return func() {
+		cancel()
+		timer := time.NewTimer(updateCleanupWait)
+		defer timer.Stop()
+		select {
+		case <-done:
+		case <-timer.C:
+		}
+	}
+}
+
+func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	stdout = defaultWriter(stdout)
+	stderr = &synchronizedWriter{w: defaultWriter(stderr)}
+
+	opts, args, err := parseGlobalOptions(args)
+	if err != nil {
+		return err
+	}
 
 	// Detect locale: --lang > VMINFO_LANG > LANG/LC_ALL > default "en"
 	locale := i18n.Detect()
-	if langFlag != "" {
-		locale = strings.ToLower(strings.TrimSpace(langFlag))
+	if opts.lang != "" {
+		locale = strings.ToLower(strings.TrimSpace(opts.lang))
 	}
 	tr := i18n.New(locale)
-
-	// Background update check (non-blocking)
-	if !noUpdateCheck && !silent && vminfo.Version != "dev" {
-		go func() {
-			cfg := updater.Config{
-				Repo:        "cloudapp3/vminfo",
-				CurrentVer:  vminfo.Version,
-				GitHubToken: updateTokenFromEnv(),
-			}
-			u := updater.New(cfg)
-			result, err := u.CheckForUpdate(context.Background())
-			if err != nil {
-				return
-			}
-			if result != nil && result.UpdateAvailable {
-				msg := fmt.Sprintf(tr.T("A new version of vminfo is available: %s (current: %s). Run 'vminfo update' to upgrade.")+"\n",
-					formatReleaseTag(result.LatestVersion), formatReleaseTag(result.CurrentVersion))
-				_, _ = fmt.Fprint(stderr, msg)
-			}
-		}()
-	}
-
-	// Handle web mode
-	if webMode {
-		addr := fmt.Sprintf("%s:%d", webBind, webPort)
-		webToken, webTokenGenerated, err := resolveRequestedWebToken(webTokenFlag, webTokenRequested)
-		if err != nil {
-			return err
-		}
-		return runWeb(ctx, stdout, stderr, tr, addr, webInterval, tuiMode, silent, webToken, webTokenGenerated)
-	}
-
-	if len(args) == 0 {
-		return runInfo(ctx, stdout, tr)
-	}
-
-	cmd := strings.ToLower(strings.TrimSpace(args[0]))
-	if isHelpAlias(cmd) {
+	if len(args) == 1 && isHelpAlias(args[0]) {
 		_, _ = io.WriteString(stdout, helpText(tr))
 		return nil
 	}
 
+	// Handle web mode
+	meta := vminfo.Metadata()
+	if opts.web {
+		if len(args) != 0 {
+			return fmt.Errorf("%w: --web does not accept command arguments: %s", ErrUsage, strings.Join(args, " "))
+		}
+		webToken, webTokenGenerated, err := resolveRequestedWebToken(opts.webToken, opts.webTokenRequested)
+		if err != nil {
+			return err
+		}
+		if err := validateWebExposure(opts.webBind, webToken); err != nil {
+			return err
+		}
+		if !opts.noUpdateCheck && !opts.silent && !strings.EqualFold(strings.TrimSpace(meta.Version), "dev") {
+			defer startBackgroundUpdateCheck(ctx, stderr, tr, meta)()
+		}
+		addr := net.JoinHostPort(normalizeWebBind(opts.webBind), strconv.Itoa(opts.webPort))
+		return runWeb(ctx, stdout, stderr, tr, addr, opts.webInterval, opts.tui, opts.silent, webToken, webTokenGenerated)
+	}
+
+	if len(args) == 0 {
+		if !opts.noUpdateCheck && !opts.silent && !strings.EqualFold(strings.TrimSpace(meta.Version), "dev") {
+			defer startBackgroundUpdateCheck(ctx, stderr, tr, meta)()
+		}
+		return runInfo(ctx, stdout, tr)
+	}
+
+	cmd := strings.ToLower(strings.TrimSpace(args[0]))
+	if cmd != "update" && !opts.noUpdateCheck && !opts.silent && !strings.EqualFold(strings.TrimSpace(meta.Version), "dev") {
+		defer startBackgroundUpdateCheck(ctx, stderr, tr, meta)()
+	}
+
 	switch cmd {
 	case "version", "--version":
-		meta := vminfo.Metadata()
+		if len(args) != 1 {
+			return fmt.Errorf("%w: version does not accept arguments", ErrUsage)
+		}
 		lines := []string{fmt.Sprintf("%s %s", meta.Name, meta.Version)}
 		if meta.Commit != "" {
 			lines = append(lines, fmt.Sprintf(tr.T("commit:")+" %s", meta.Commit))
@@ -522,10 +688,13 @@ func runSummary(ctx context.Context, stdout, stderr io.Writer, args []string, tr
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("%w: %v", ErrUsage, err)
 	}
 	if len(fs.Args()) != 0 {
 		return fmt.Errorf("%w: summary does not accept positional args", ErrUsage)
+	}
+	if interval <= 0 {
+		return fmt.Errorf("%w: summary interval must be > 0", ErrUsage)
 	}
 
 	staticInfo, stats, err := vminfo.CollectAll(ctx, vminfo.Options{SampleInterval: interval})
@@ -553,13 +722,16 @@ func runWatch(ctx context.Context, stdout, stderr io.Writer, args []string, tr *
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("%w: %v", ErrUsage, err)
 	}
 	if len(fs.Args()) != 0 {
 		return fmt.Errorf("%w: watch does not accept positional args", ErrUsage)
 	}
 	if count < 0 {
 		return fmt.Errorf("%w: watch count must be >= 0", ErrUsage)
+	}
+	if interval <= 0 {
+		return fmt.Errorf("%w: watch interval must be > 0", ErrUsage)
 	}
 
 	encoder := json.NewEncoder(stdout)
@@ -610,7 +782,7 @@ func runPS(ctx context.Context, stdout, stderr io.Writer, args []string, tr *i18
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("%w: %v", ErrUsage, err)
 	}
 	if len(fs.Args()) > 1 {
 		return fmt.Errorf("%w: ps accepts at most one filter term", ErrUsage)
@@ -688,26 +860,39 @@ func runKill(ctx context.Context, stdout io.Writer, args []string, tr *i18n.Tran
 	if len(args) != 1 {
 		return fmt.Errorf("%w: kill requires exactly one pid", ErrUsage)
 	}
-	pidValue, err := strconv.Atoi(strings.TrimSpace(args[0]))
+	pidValue, err := parsePID(args[0])
 	if err != nil {
-		return fmt.Errorf("%w: invalid pid %q", ErrUsage, args[0])
+		return err
 	}
-	if err := vminfo.TerminateProcess(ctx, int32(pidValue)); err != nil {
+	if err := vminfo.TerminateProcess(ctx, pidValue); err != nil {
 		return fmt.Errorf("failed to terminate PID %d: %w", pidValue, err)
 	}
 	_, err = fmt.Fprintf(stdout, tr.T("sent SIGTERM to PID %d")+"\n", pidValue)
 	return err
 }
 
+func parsePID(raw string) (int32, error) {
+	value := strings.TrimSpace(raw)
+	pid, err := strconv.ParseInt(value, 10, 32)
+	if err != nil || pid <= 0 {
+		return 0, fmt.Errorf("%w: invalid pid %q", ErrUsage, raw)
+	}
+	return int32(pid), nil
+}
+
 func writeSummary(w io.Writer, staticInfo vminfo.StaticInfo, stats vminfo.RuntimeStats, tr *i18n.Translator) error {
+	osText := strings.TrimSpace(strings.Join([]string{
+		terminalText(staticInfo.Platform, staticInfo.OS, "-"),
+		terminalText(staticInfo.OSVersion),
+	}, " "))
 	lines := []string{
 		tr.T("Host Summary"),
 		"============",
-		fmt.Sprintf(tr.T("Host     :")+" %s", firstNonEmpty(staticInfo.Hostname, "-")),
-		fmt.Sprintf(tr.T("OS       :")+" %s", strings.TrimSpace(strings.Join([]string{firstNonEmpty(staticInfo.Platform, staticInfo.OS, "-"), strings.TrimSpace(staticInfo.OSVersion)}, " "))),
-		fmt.Sprintf(tr.T("Kernel   :")+" %s", firstNonEmpty(staticInfo.Kernel, "-")),
-		fmt.Sprintf(tr.T("Arch     :")+" %s", firstNonEmpty(staticInfo.Arch, "-")),
-		fmt.Sprintf(tr.T("CPU      :")+" %s ("+tr.T("%d cores")+")", firstNonEmpty(staticInfo.CPUModel, "-"), staticInfo.CPUCores),
+		fmt.Sprintf(tr.T("Host     :")+" %s", terminalText(staticInfo.Hostname, "-")),
+		fmt.Sprintf(tr.T("OS       :")+" %s", osText),
+		fmt.Sprintf(tr.T("Kernel   :")+" %s", terminalText(staticInfo.Kernel, "-")),
+		fmt.Sprintf(tr.T("Arch     :")+" %s", terminalText(staticInfo.Arch, "-")),
+		fmt.Sprintf(tr.T("CPU      :")+" %s ("+tr.T("%d cores")+")", terminalText(staticInfo.CPUModel, "-"), staticInfo.CPUCores),
 		fmt.Sprintf(tr.T("Memory   :")+" %s"+tr.T(" used / ")+"%s"+tr.T(" total"), formatBytes(stats.MemUsed), formatBytes(staticInfo.MemTotal)),
 		fmt.Sprintf(tr.T("Swap     :")+" %s"+tr.T(" used / ")+"%s"+tr.T(" total"), formatBytes(stats.SwapUsed), formatBytes(staticInfo.SwapTotal)),
 		fmt.Sprintf(tr.T("Disk     :")+" %s"+tr.T(" used / ")+"%s"+tr.T(" total"), formatBytes(stats.DiskUsed), formatBytes(staticInfo.DiskTotal)),
@@ -723,12 +908,12 @@ func writeSummary(w io.Writer, staticInfo vminfo.StaticInfo, stats vminfo.Runtim
 
 func writeWatchSnapshot(w io.Writer, collectedAt time.Time, staticInfo vminfo.StaticInfo, stats vminfo.RuntimeStats, tr *i18n.Translator) error {
 	osText := strings.TrimSpace(strings.Join([]string{
-		firstNonEmpty(staticInfo.Platform, staticInfo.OS, "-"),
-		strings.TrimSpace(staticInfo.OSVersion),
+		terminalText(staticInfo.Platform, staticInfo.OS, "-"),
+		terminalText(staticInfo.OSVersion),
 	}, " "))
 
 	lines := []string{
-		fmt.Sprintf("[%s] host=%s os=%s", collectedAt.Format(time.RFC3339), firstNonEmpty(staticInfo.Hostname, "-"), osText),
+		fmt.Sprintf("[%s] host=%s os=%s", collectedAt.Format(time.RFC3339), terminalText(staticInfo.Hostname, "-"), osText),
 		fmt.Sprintf(
 			"cpu=%s mem=%s/%s swap=%s/%s disk=%s/%s",
 			formatPercent(stats.CPU),
@@ -770,10 +955,10 @@ func writeProcesses(w io.Writer, items []vminfo.ProcessInfo, tr *i18n.Translator
 			item.CPUPercent,
 			item.MemoryPercent,
 			formatBytes(item.RSSBytes),
-			firstNonEmpty(item.User, "-"),
-			firstNonEmpty(item.State, "-"),
+			terminalText(item.User, "-"),
+			terminalText(item.State, "-"),
 			formatUptime(item.Uptime),
-			firstNonEmpty(item.Command, item.Name, "-"),
+			terminalText(item.Command, item.Name, "-"),
 		); err != nil {
 			return err
 		}
@@ -796,11 +981,11 @@ func writeProcessTree(w io.Writer, items []vminfo.ProcessInfo, filter string, li
 			item.CPUPercent,
 			item.MemoryPercent,
 			formatBytes(item.RSSBytes),
-			firstNonEmpty(item.User, "-"),
-			firstNonEmpty(item.State, "-"),
+			terminalText(item.User, "-"),
+			terminalText(item.State, "-"),
 			formatUptime(item.Uptime),
 			strings.Repeat("  ", row.depth),
-			firstNonEmpty(item.Command, item.Name, "-"),
+			terminalText(item.Command, item.Name, "-"),
 		); err != nil {
 			return err
 		}
@@ -1023,7 +1208,7 @@ func helpText(tr *i18n.Translator) string {
 		"  --lang <code>          " + tr.T("force language: en|zh|de|es|fr|ja|ko|pt|ru"),
 		"  --web                  " + tr.T("enable web dashboard"),
 		"  --port <N>             " + tr.T("web dashboard port (default 20021)"),
-		"  --bind <addr>          " + tr.T("bind address (default 127.0.0.1, use 0.0.0.0 for all)"),
+		"  --bind <addr>          " + tr.T("bind address (default 127.0.0.1; non-loopback requires --token)"),
 		"  --token [value]        " + tr.T("protect --web with a token; bare --token generates one"),
 		"  --tui                  " + tr.T("start TUI alongside --web"),
 		"  --silent, -s           " + tr.T("suppress informational output"),
@@ -1054,6 +1239,16 @@ func defaultWriter(w io.Writer) io.Writer {
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func terminalText(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(textsafe.Terminal(value))
 		if value != "" {
 			return value
 		}

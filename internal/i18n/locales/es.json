@@ -127,7 +127,7 @@
   "enable web dashboard": "activar panel web",
   "web dashboard on port N (default 20021)": "panel web en el puerto N (predeterminado 20021)",
   "web dashboard port (default 20021)": "puerto del panel web (predeterminado 20021)",
-  "bind address (default 127.0.0.1, use 0.0.0.0 for all)": "dirección de enlace (predeterminada 127.0.0.1, usa 0.0.0.0 para todas)",
+  "bind address (default 127.0.0.1; non-loopback requires --token)": "dirección de enlace (predeterminada 127.0.0.1; las direcciones no loopback requieren --token)",
   "refresh interval (default 3s)": "intervalo de actualización (predeterminado 3s)",
   "suppress informational output": "suprimir salida informativa",
   "protect --web with a token; bare --token generates one": "proteger --web con token; --token sin valor genera uno",

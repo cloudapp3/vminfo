@@ -127,7 +127,7 @@
   "enable web dashboard": "Web-Dashboard aktivieren",
   "web dashboard on port N (default 20021)": "Web-Dashboard auf Port N (Standard 20021)",
   "web dashboard port (default 20021)": "Web-Dashboard-Port (Standard 20021)",
-  "bind address (default 127.0.0.1, use 0.0.0.0 for all)": "Bind-Adresse (Standard 127.0.0.1, 0.0.0.0 für alle)",
+  "bind address (default 127.0.0.1; non-loopback requires --token)": "Bind-Adresse (Standard 127.0.0.1; Nicht-Loopback erfordert --token)",
   "refresh interval (default 3s)": "Aktualisierungsintervall (Standard 3s)",
   "suppress informational output": "Informationsausgaben unterdrücken",
   "protect --web with a token; bare --token generates one": "--web mit Token schützen; blankes --token erzeugt eins",

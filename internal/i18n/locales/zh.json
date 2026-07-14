@@ -126,7 +126,7 @@
   "enable web dashboard": "启用 Web 仪表盘",
   "web dashboard on port N (default 20021)": "Web 仪表盘监听端口 N（默认 20021）",
   "web dashboard port (default 20021)": "Web 仪表盘端口（默认 20021）",
-  "bind address (default 127.0.0.1, use 0.0.0.0 for all)": "绑定地址（默认 127.0.0.1，使用 0.0.0.0 监听全部）",
+  "bind address (default 127.0.0.1; non-loopback requires --token)": "绑定地址（默认 127.0.0.1；非回环地址必须使用 --token）",
   "refresh interval (default 3s)": "刷新间隔（默认 3s）",
   "suppress informational output": "抑制提示信息输出",
   "protect --web with a token; bare --token generates one": "使用 token 保护 --web；裸 --token 会生成一个",
