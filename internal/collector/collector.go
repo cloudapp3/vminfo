@@ -1,9 +1,12 @@
 package collector
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log"
+	"maps"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -60,6 +63,8 @@ type Collector struct {
 	subs  map[string]chan *Snapshot
 
 	stopCh        chan struct{}
+	startOnce     sync.Once
+	stopOnce      sync.Once
 	procConsumers int32 // atomic: >0 means someone wants process data
 }
 
@@ -99,14 +104,18 @@ func (c *Collector) Unsubscribe(id string) {
 func (c *Collector) Latest() *Snapshot {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.snapshot
+	if c.snapshot == nil {
+		return nil
+	}
+	snapshot := cloneSnapshot(*c.snapshot)
+	return &snapshot
 }
 
 // LatestJSON returns the pre-serialized JSON of the latest snapshot.
 func (c *Collector) LatestJSON() []byte {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.cachedJSON
+	return bytes.Clone(c.cachedJSON)
 }
 
 // LatestWithProcesses returns the most recent snapshot, hydrating process
@@ -117,7 +126,7 @@ func (c *Collector) LatestWithProcesses(ctx context.Context) *Snapshot {
 		c.mu.RUnlock()
 		return nil
 	}
-	snap := *c.snapshot
+	snap := cloneSnapshot(*c.snapshot)
 	c.mu.RUnlock()
 
 	if !needsProcessHydration(snap) {
@@ -145,8 +154,8 @@ func (c *Collector) LatestJSONWithProcesses(ctx context.Context) []byte {
 		c.mu.RUnlock()
 		return nil
 	}
-	snap := *c.snapshot
-	cached := c.cachedJSON
+	snap := cloneSnapshot(*c.snapshot)
+	cached := bytes.Clone(c.cachedJSON)
 	c.mu.RUnlock()
 
 	if !needsProcessHydration(snap) {
@@ -173,6 +182,20 @@ func (c *Collector) LatestJSONWithProcesses(ctx context.Context) []byte {
 
 // Start begins the collection loop. Blocks until Stop is called.
 func (c *Collector) Start(ctx context.Context) {
+	c.startOnce.Do(func() {
+		c.run(ctx)
+	})
+}
+
+func (c *Collector) run(ctx context.Context) {
+	select {
+	case <-c.stopCh:
+		return
+	case <-ctx.Done():
+		return
+	default:
+	}
+
 	c.collectOnce(ctx)
 
 	ticker := time.NewTicker(c.interval)
@@ -192,10 +215,9 @@ func (c *Collector) Start(ctx context.Context) {
 
 // Stop signals the collector to stop.
 func (c *Collector) Stop() {
-	select {
-	case c.stopCh <- struct{}{}:
-	default:
-	}
+	c.stopOnce.Do(func() {
+		close(c.stopCh)
+	})
 }
 
 // RequestProcesses increments the process consumer counter.
@@ -226,25 +248,39 @@ func (c *Collector) collectOnce(ctx context.Context) {
 		procs, _ = vminfo.ListProcesses(ctx)
 	}
 
-	// Update CPU history and snapshot in a single lock acquisition
+	// Update CPU history before publishing the newly constructed snapshot.
 	c.history.push(stats.CPU)
 	historyCopy := c.history.slice()
 
 	snap := BuildSnapshot(staticInfo, stats, procs, historyCopy)
 	data, _ := json.Marshal(snap)
 
+	storedSnapshot := cloneSnapshot(snap)
 	c.mu.Lock()
-	c.snapshot = &snap
+	c.snapshot = &storedSnapshot
 	c.cachedJSON = data
 	c.mu.Unlock()
 
 	// Broadcast to subscribers (non-blocking)
 	c.subMu.RLock()
 	for _, ch := range c.subs {
+		subscriberSnapshot := cloneSnapshot(snap)
 		select {
-		case ch <- &snap:
+		case ch <- &subscriberSnapshot:
 		default:
 		}
 	}
 	c.subMu.RUnlock()
+}
+
+func cloneSnapshot(snapshot Snapshot) Snapshot {
+	snapshot.CPU.PerCore = slices.Clone(snapshot.CPU.PerCore)
+	snapshot.CPU.History = slices.Clone(snapshot.CPU.History)
+	snapshot.Disk.Filesystems = slices.Clone(snapshot.Disk.Filesystems)
+	snapshot.Disk.IO = slices.Clone(snapshot.Disk.IO)
+	snapshot.Network.TCPStates = maps.Clone(snapshot.Network.TCPStates)
+	snapshot.Network.Interfaces = slices.Clone(snapshot.Network.Interfaces)
+	snapshot.Processes.List = slices.Clone(snapshot.Processes.List)
+	snapshot.Health.Warnings = slices.Clone(snapshot.Health.Warnings)
+	return snapshot
 }

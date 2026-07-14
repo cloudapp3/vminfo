@@ -2,8 +2,11 @@ package vminfo
 
 import (
 	"context"
+	"runtime"
 	"testing"
 	"time"
+
+	"github.com/shirou/gopsutil/v3/cpu"
 )
 
 func TestCollectAllRefreshesDynamicUptimeWithStaticCache(t *testing.T) {
@@ -58,5 +61,30 @@ func TestCalcIfaceSpeedsRates(t *testing.T) {
 	}
 	if iface.TxDropRate != 30 {
 		t.Fatalf("tx drop rate = %v, want 30", iface.TxDropRate)
+	}
+}
+
+func TestParseCPUSampleDoesNotDoubleCountGuestTime(t *testing.T) {
+	stat := cpu.TimesStat{
+		User:      100,
+		System:    20,
+		Idle:      50,
+		Nice:      10,
+		Iowait:    5,
+		Irq:       2,
+		Softirq:   3,
+		Steal:     4,
+		Guest:     30,
+		GuestNice: 5,
+	}
+
+	got := parseCPUSample(stat)
+	wantTotal := 229.0
+	if runtime.GOOS == "linux" {
+		wantTotal = 194
+	}
+	const wantIdle = 55
+	if got.total != wantTotal || got.idle != wantIdle {
+		t.Fatalf("parseCPUSample() = %+v, want total=%v idle=%v", got, wantTotal, wantIdle)
 	}
 }

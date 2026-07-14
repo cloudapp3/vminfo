@@ -8,12 +8,12 @@ import (
 	gnet "github.com/shirou/gopsutil/v3/net"
 )
 
-func countUDPConnections() uint32 {
-	return countConnsGopsutil("udp")
+func countUDPConnections(ctx context.Context) uint32 {
+	return countConnsGopsutil(ctx, "udp")
 }
 
-func countConnsGopsutil(kind string) uint32 {
-	conns, err := gnet.ConnectionsWithContext(context.Background(), kind)
+func countConnsGopsutil(ctx context.Context, kind string) uint32 {
+	conns, err := gnet.ConnectionsWithContext(ctx, kind)
 	if err != nil {
 		return 0
 	}
@@ -23,8 +23,8 @@ func countConnsGopsutil(kind string) uint32 {
 // readTCPStates buckets TCP connections by their decoded status via gopsutil.
 // Non-Linux platforms lack /proc/net/tcp, so gopsutil is the cross-platform
 // source for both the total count and the state distribution.
-func readTCPStates() (uint32, map[string]uint32) {
-	conns, err := gnet.ConnectionsWithContext(context.Background(), "tcp")
+func readTCPStates(ctx context.Context) (uint32, map[string]uint32) {
+	conns, err := gnet.ConnectionsWithContext(ctx, "tcp")
 	if err != nil {
 		return 0, nil
 	}

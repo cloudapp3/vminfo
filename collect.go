@@ -3,6 +3,7 @@ package vminfo
 import (
 	"context"
 	"net"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -271,8 +272,8 @@ func buildRuntimeStats(ctx context.Context, opts Options, base hostBase) (Runtim
 		stats.Load15 = avg.Load15
 	}
 
-	stats.TCPCount, stats.TCPStates = readTCPStates()
-	stats.UDPCount = countUDPConnections()
+	stats.TCPCount, stats.TCPStates = readTCPStates(ctx)
+	stats.UDPCount = countUDPConnections(ctx)
 	stats.ConntrackCount, stats.ConntrackMax = conntrackUsage()
 	stats.ProcessCount = countProcesses(ctx)
 	return stats, nil
@@ -322,6 +323,10 @@ func readCPUCoreSamples(ctx context.Context) ([]cpuSample, error) {
 func parseCPUSample(stat cpu.TimesStat) cpuSample {
 	idle := stat.Idle + stat.Iowait
 	total := stat.User + stat.System + stat.Idle + stat.Nice + stat.Iowait + stat.Irq + stat.Softirq + stat.Steal + stat.Guest + stat.GuestNice
+	if runtime.GOOS == "linux" {
+		// Linux accounts guest and guest_nice time inside user and nice already.
+		total -= stat.Guest + stat.GuestNice
+	}
 	return cpuSample{total: total, idle: idle}
 }
 

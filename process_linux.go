@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/user"
 	"strconv"
 	"strings"
 	"sync"
@@ -57,20 +56,15 @@ func listProcesses(ctx context.Context) ([]ProcessInfo, error) {
 	out := make(chan result, len(pids))
 
 	var wg sync.WaitGroup
-	workers := procListWorkers
-	if workers > len(pids) {
-		workers = len(pids)
-	}
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	workers := min(procListWorkers, len(pids))
+	for range workers {
+		wg.Go(func() {
 			for pid := range jobs {
 				if info, ok := readProcEntry(pid, systemUptime, memTotal, users); ok {
 					out <- result{info: info, ok: true}
 				}
 			}
-		}()
+		})
 	}
 	for _, pid := range pids {
 		jobs <- pid
@@ -324,6 +318,9 @@ func readMemTotalBytes() (uint64, error) {
 		}
 		return kb * 1024, nil
 	}
+	if err := scanner.Err(); err != nil {
+		return 0, err
+	}
 	return 0, fmt.Errorf("MemTotal not found")
 }
 
@@ -350,34 +347,17 @@ func readPasswdMap() map[uint32]string {
 			m[uint32(uid)] = parts[0]
 		}
 	}
+	// Best-effort lookup: return entries parsed before any read error or
+	// oversize line rather than dropping the whole map.
+	_ = scanner.Err()
 	return m
 }
 
-// lookupUser resolves uid → username, preferring the cached /etc/passwd
-// map and falling back to os/user.LookupId for NSS-backed users (LDAP,
-// SSSD, nss_systemd). Numeric UID is the last resort.
+// lookupUser resolves uid from the local passwd snapshot. Avoiding NSS here
+// keeps process collection bounded when remote identity providers are slow.
 func lookupUser(uid uint32, cached map[uint32]string) string {
 	if name, ok := cached[uid]; ok && name != "" {
 		return name
-	}
-	nssUserCache.mu.RLock()
-	v, ok := nssUserCache.m[uid]
-	nssUserCache.mu.RUnlock()
-	if ok {
-		if v == "" {
-			return strconv.FormatUint(uint64(uid), 10)
-		}
-		return v
-	}
-	resolved := ""
-	if u, err := user.LookupId(strconv.FormatUint(uint64(uid), 10)); err == nil && u.Username != "" {
-		resolved = u.Username
-	}
-	nssUserCache.mu.Lock()
-	nssUserCache.m[uid] = resolved
-	nssUserCache.mu.Unlock()
-	if resolved != "" {
-		return resolved
 	}
 	return strconv.FormatUint(uint64(uid), 10)
 }
@@ -391,15 +371,6 @@ func firstNonEmptyString(values ...string) string {
 	}
 	return ""
 }
-
-// nssUserCache memoizes os/user.LookupId results across listProcesses
-// calls. NSS lookups can hit a remote directory (LDAP/SSSD), so caching
-// avoids spending hundreds of cgo calls per refresh. Empty-string value
-// means "looked up, not found" — still prevents repeat lookups.
-var nssUserCache = struct {
-	mu sync.RWMutex
-	m  map[uint32]string
-}{m: make(map[uint32]string, 16)}
 
 func terminateProcess(ctx context.Context, pid int32) error {
 	if pid <= 0 {
