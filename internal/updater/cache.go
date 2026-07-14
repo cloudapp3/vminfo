@@ -46,6 +46,10 @@ func ReadCache() (CacheFile, error) {
 // back to CacheDir().
 func ReadCacheAt(dir string) (CacheFile, error) {
 	path := cacheFilePath(dir)
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return CacheFile{}, nil
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return CacheFile{}, nil

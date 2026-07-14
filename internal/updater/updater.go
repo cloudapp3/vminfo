@@ -50,11 +50,17 @@ func New(cfg Config) *Updater {
 // CheckForUpdate queries the GitHub Releases API and compares versions.
 // It uses the cache to avoid redundant API calls within CacheTTL.
 func (u *Updater) CheckForUpdate(ctx context.Context) (*CheckResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	current := stripVersionPrefix(u.cfg.CurrentVer)
 	unknownCurrent := current == "" || current == "dev"
 
 	// Check cache first
 	cache, _ := ReadCacheAt(u.cfg.CacheDir)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if !ShouldCheck(cache, u.cfg.CacheTTL) && cache.LatestVersion != "" {
 		latest := stripVersionPrefix(cache.LatestVersion)
 		return &CheckResult{

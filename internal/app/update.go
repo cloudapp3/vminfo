@@ -43,7 +43,7 @@ func runUpdate(ctx context.Context, stdout, stderr io.Writer, args []string, tr 
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("%w: %v", ErrUsage, err)
 	}
 	if len(fs.Args()) != 0 {
 		return fmt.Errorf("%w: update does not accept positional args", ErrUsage)
@@ -80,6 +80,29 @@ func runUpdate(ctx context.Context, stdout, stderr io.Writer, args []string, tr 
 
 	if checkOnly {
 		return writeUpdateCheck(stdout, result, targetTag != "", tr)
+	}
+	if targetTag == "" && result.UpdateAvailable && result.Release == nil {
+		latestTag := normalizeReleaseTag(result.LatestVersion)
+		if latestTag == "" || strings.EqualFold(latestTag, "dev") {
+			return fmt.Errorf("failed to install update: release metadata is unavailable for version %q", result.LatestVersion)
+		}
+
+		result, err = client.CheckSpecificVersion(ctx, latestTag)
+		if err != nil {
+			return fmt.Errorf("failed to fetch release metadata for %s: %w", latestTag, err)
+		}
+		if result == nil {
+			return fmt.Errorf("failed to fetch release metadata for %s: empty result", latestTag)
+		}
+		if normalizeReleaseTag(result.LatestVersion) != latestTag {
+			return fmt.Errorf("failed to fetch release metadata for %s: returned version is %s", latestTag, formatReleaseTag(result.LatestVersion))
+		}
+		if result.Release == nil {
+			return fmt.Errorf("failed to install update: release metadata is unavailable")
+		}
+		if normalizeReleaseTag(result.Release.TagName) != latestTag {
+			return fmt.Errorf("failed to fetch release metadata for %s: release tag is %s", latestTag, formatReleaseTag(result.Release.TagName))
+		}
 	}
 
 	if !result.UpdateAvailable {
