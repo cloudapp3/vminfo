@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://vminfo.bestcheapvps.org
+    about: Read installation, command, web dashboard, API, and library documentation.
+  - name: Usage questions and community support
+    url: https://t.me/VMPulse
+    about: Ask installation and usage questions in the VMPulse Telegram group.
+  - name: Report a security vulnerability
+    url: https://github.com/cloudapp3/vminfo/security/advisories/new
+    about: Send sensitive vulnerability details privately. Do not open a public issue.

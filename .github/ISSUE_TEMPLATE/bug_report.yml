@@ -1,0 +1,106 @@
+name: Bug report
+description: Report a reproducible vminfo failure or regression
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Remove tokens, public IP addresses, hostnames, usernames, process arguments, and other sensitive data before submitting.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - CLI commands
+        - Terminal UI
+        - Web dashboard or API
+        - Go library
+        - Installer or updater
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: vminfo version
+      description: Paste the output of `vminfo version` or provide the commit SHA.
+      placeholder: vX.Y.Z or commit SHA
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: platform-details
+    attributes:
+      label: Platform details
+      description: Include distribution or OS version, architecture, and terminal name/size when relevant.
+      placeholder: Debian 12, amd64, tmux 3.3a, 120x35
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      description: Enter the exact command and flags that triggered the problem.
+      placeholder: vminfo summary --json
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest reliable sequence that reproduces the issue.
+      placeholder: |
+        1. Install ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or sanitized output
+      description: Paste only the output needed to diagnose the issue.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: I removed secrets and sensitive host or process data.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

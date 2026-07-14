@@ -1,0 +1,77 @@
+name: Feature request
+description: Propose a focused improvement to vminfo
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the operational problem first. Non-trivial changes should preserve cross-platform behavior, CLI JSON compatibility, and the public Go library unless a breaking change is explicitly agreed.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Target area
+      options:
+        - CLI commands
+        - Terminal UI
+        - Web dashboard or API
+        - Go library
+        - Installer or updater
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Explain the workflow, limitation, or user need without assuming an implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the observable behavior you want.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: List current workarounds or other tools you evaluated.
+
+  - type: checkboxes
+    id: platforms
+    attributes:
+      label: Relevant platforms
+      options:
+        - label: Linux
+        - label: macOS
+        - label: Windows
+        - label: Platform-independent
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility considerations
+      description: Note any expected CLI, JSON, API, package, or platform behavior changes.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add sanitized examples, mockups, or links that clarify the request.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched existing issues for a similar request.
+          required: true
+        - label: I described the problem and desired outcome, not only an implementation.
+          required: true
