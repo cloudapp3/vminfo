@@ -1,6 +1,6 @@
-# vminfo - cross-platform terminal system monitor, web dashboard, and Go library
+# vminfo - cross-platform terminal system monitor, web dashboard, MCP server, and Go library
 
-> A single-binary system monitoring toolkit for Linux, macOS, and Windows. Inspect CPU, memory, disk, network, and load in a live terminal UI, export JSON for automation, open a browser dashboard, or embed host metrics in Go. No background agent or configuration is required for local monitoring.
+> A single-binary system monitoring toolkit for Linux, macOS, and Windows. Inspect CPU, memory, disk, network, and load in a live terminal UI, export JSON for automation, open a browser dashboard, connect an MCP client, or embed host metrics in Go. No background agent or configuration is required for local monitoring.
 
 [![CI](https://github.com/cloudapp3/vminfo/actions/workflows/ci.yml/badge.svg)](https://github.com/cloudapp3/vminfo/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/cloudapp3/vminfo?display_name=tag)](https://github.com/cloudapp3/vminfo/releases/latest)
@@ -8,9 +8,9 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/cloudapp3/vminfo.svg)](https://pkg.go.dev/github.com/cloudapp3/vminfo)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Documentation: [vminfo documentation](https://vminfo.bestcheapvps.org) · [中文说明](https://vminfo.bestcheapvps.org/zh/) · [HTTP API reference](https://vminfo.bestcheapvps.org/api) · [Docs source](https://github.com/cloudapp3/vmdocs)
+Documentation: [vminfo documentation](https://vminfo.bestcheapvps.org) · [中文说明](https://vminfo.bestcheapvps.org/zh/) · [MCP server](https://vminfo.bestcheapvps.org/commands/mcp) · [HTTP API reference](https://vminfo.bestcheapvps.org/api) · [Docs source](https://github.com/cloudapp3/vmdocs)
 
-[Preview](#preview) · [Quick start](#quick-start) · [Why vminfo](#why-vminfo) · [Commands](#commands) · [Platform support](#platform-support) · [FAQ](#faq) · [Contributing](#contributing)
+[Preview](#preview) · [Quick start](#quick-start) · [Why vminfo](#why-vminfo) · [Commands](#commands) · [MCP](#mcp-server) · [Platform support](#platform-support) · [FAQ](#faq) · [Contributing](#contributing)
 
 ## Preview
 
@@ -74,13 +74,15 @@ Use vminfo when you need to:
 - inspect and manage Linux processes without switching tools
 - export stable JSON snapshots or JSON Lines for scripts, CI, and automation
 - open a lightweight browser dashboard with `vminfo --web`
+- let a local MCP client inspect host state and run bounded network diagnostics
 - embed host metrics collection or the TUI into your own Go tools
 
-The same binary provides four interfaces:
+The same binary provides five interfaces:
 
 - **Terminal UI** - full-screen, live-updating overview and process views
 - **JSON and text CLI** - one-shot or streaming output for automation
 - **Web dashboard** - browser UI with REST and WebSocket endpoints
+- **MCP server** - read-only stdio tools for local AI clients
 - **Go library** - public collection APIs plus an embeddable TUI package
 
 Collected metrics include CPU per core, memory, swap, disk, disk I/O, network, load, TCP/UDP counts, TCP state distribution, conntrack usage, interface rates, processes, temperatures, uptime, and host metadata.
@@ -162,6 +164,7 @@ vminfo net ping vminfo.bestcheapvps.org --tcp-port 443   # TCP ping (default; cr
 vminfo net ping vminfo.bestcheapvps.org --mode icmp      # real ICMP ping (needs privileges)
 vminfo net ip                         # your public IP + ASN / geo
 vminfo net ip 8.8.8.8                 # lookup a specific IP
+vminfo mcp             # read-only MCP server over stdio
 vminfo update          # check + install the latest tagged release
 vminfo update --check  # check without installing
 vminfo update --version vX.Y.Z
@@ -175,6 +178,59 @@ Built-in languages: `en`, `zh`, `de`, `es`, `fr`, `ja`, `ko`, `pt`, `ru`.
 are accepted. CLI ping count is limited to 1-100 and probe timeouts must be
 positive and no greater than 10 seconds.
 
+## MCP server
+
+`vminfo mcp` starts a foreground, tools-only MCP server over stdio. It does not
+listen on a network port, run the web dashboard, or perform background update
+checks. The process exits when its MCP client disconnects.
+
+Available tools:
+
+| Tool | Purpose |
+| --- | --- |
+| `get_system_snapshot` | Current host, CPU, memory, disk, network, load, process-count, and health data |
+| `list_processes` | Filtered and sorted Linux process data, limited to 200 results |
+| `resolve_dns` | DNS lookup with the system or a selected resolver |
+| `check_port` | Bounded TCP connectivity and latency check |
+| `ping_host` | Bounded TCP or ICMP reachability probes |
+| `lookup_ip` | Public IP / ASN / geo lookup through `ip.bestcheapvps.org` |
+| `get_version` | Version, build, repository, and schema metadata |
+
+Claude Desktop configuration:
+
+```json
+{
+  "mcpServers": {
+    "vminfo": {
+      "command": "/usr/local/bin/vminfo",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Codex configuration:
+
+```toml
+[mcp_servers.vminfo]
+command = "/usr/local/bin/vminfo"
+args = ["mcp"]
+```
+
+Example prompt after connecting an MCP client:
+
+> Check this host's CPU, memory, disk, and network health, then list the five
+> processes using the most memory. Do not make any changes.
+
+The MCP server is read-only: it does not expose `kill`, `update`, shell
+execution, file writes, prompts, or resources. Process command lines are hidden
+unless a call explicitly sets `include_command` to `true`; command arguments
+can contain credentials or other secrets. While command lines are hidden, the
+process filter does not search them. Snapshot and process results are sent to
+the model configured by the MCP client. Network tools contact the requested
+target, and `lookup_ip` makes an explicit outbound request to
+`ip.bestcheapvps.org`.
+
 ## Platform support
 
 | Capability | Linux | macOS | Windows |
@@ -182,11 +238,12 @@ positive and no greater than 10 seconds.
 | `summary` / `watch` | ✅ | ✅ | ✅ |
 | TUI | ✅ | ✅ | ✅ |
 | Web dashboard | ✅ | ✅ | ✅ |
+| MCP server | ✅ | ✅ | ✅ |
 | `ps` / `kill` | ✅ | ⚠️ stub | ⚠️ stub |
 | `update --check` | ✅ | ✅ | ✅ |
 | `update` install | ✅ | ✅ | ⚠️ check-only |
 
-TUI requires a real TTY. `ps` and `kill` are Linux-only by design.
+TUI requires a real TTY. `ps`, `kill`, and the MCP `list_processes` tool are Linux-only by design.
 
 ## Web dashboard
 
@@ -331,7 +388,7 @@ Status badges: `LIVE` · `PAUSED` · `LOADING` · `ERROR` · `STALE`
 
 ### Does vminfo require a daemon or configuration file?
 
-No background service or configuration file is required for the TUI, `summary`, `watch`, or network diagnostics. Web mode starts a foreground HTTP server only when you request `vminfo --web`.
+No background service or configuration file is required for the TUI, `summary`, `watch`, or network diagnostics. Web mode starts a foreground HTTP server only when you request `vminfo --web`; MCP mode starts a foreground stdio server only when an MCP client runs `vminfo mcp`.
 
 ### Does vminfo require root privileges?
 
@@ -339,7 +396,7 @@ Normal monitoring commands do not require root. Installing into a protected dire
 
 ### Which features work on Windows and macOS?
 
-The TUI, `summary`, `watch`, web dashboard, and update checks are cross-platform. `ps` and `kill` are Linux-only, and Windows self-update is currently check-only. See [Platform support](#platform-support).
+The TUI, `summary`, `watch`, web dashboard, MCP server, and update checks are cross-platform. `ps`, `kill`, and the MCP process-list tool are Linux-only, and Windows self-update is currently check-only. See [Platform support](#platform-support).
 
 ### Can I use vminfo in scripts and CI?
 

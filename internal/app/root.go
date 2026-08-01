@@ -289,6 +289,12 @@ func startBackgroundUpdateCheck(ctx context.Context, stderr io.Writer, tr *i18n.
 }
 
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	return RunWithIO(ctx, args, os.Stdin, stdout, stderr)
+}
+
+// RunWithIO executes the CLI with explicit standard streams. stdin is used by
+// protocol-oriented commands such as `vminfo mcp`.
+func RunWithIO(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	stdout = defaultWriter(stdout)
 	stderr = &synchronizedWriter{w: defaultWriter(stderr)}
 
@@ -336,7 +342,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 
 	cmd := strings.ToLower(strings.TrimSpace(args[0]))
-	if cmd != "update" && !opts.noUpdateCheck && !opts.silent && !strings.EqualFold(strings.TrimSpace(meta.Version), "dev") {
+	if cmd != "update" && cmd != "mcp" && !opts.noUpdateCheck && !opts.silent && !strings.EqualFold(strings.TrimSpace(meta.Version), "dev") {
 		defer startBackgroundUpdateCheck(ctx, stderr, tr, meta)()
 	}
 
@@ -374,6 +380,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runUpdate(ctx, stdout, stderr, args[1:], tr)
 	case "net":
 		return runNet(ctx, stdout, stderr, args[1:], tr)
+	case "mcp":
+		return runMCP(ctx, stdin, stdout, args[1:], tr)
 	default:
 		_, _ = fmt.Fprintf(stderr, tr.T("unknown command: %s")+"\n\n", cmd)
 		_, _ = io.WriteString(stderr, helpText(tr))
@@ -1201,6 +1209,7 @@ func helpText(tr *i18n.Translator) string {
 		"  vminfo net port <h> <p>  " + tr.T("test TCP port connectivity"),
 		"  vminfo net ping <host>   " + tr.T("probe host reachability (default tcp; --mode icmp)"),
 		"  vminfo net ip [<ip>]      " + tr.T("lookup IP geo/ASN (no arg = your public IP; via ip.bestcheapvps.org)"),
+		"  vminfo mcp             " + tr.T("start read-only MCP server over stdio"),
 		"  vminfo --version       " + tr.T("show app version"),
 		"  vminfo --help          " + tr.T("show help"),
 		"",
@@ -1216,7 +1225,7 @@ func helpText(tr *i18n.Translator) string {
 		"  --no-update-check      " + tr.T("skip background update check"),
 		"",
 		tr.T("Status:"),
-		"  " + tr.T("TUI, web, summary, watch, ps, kill, update, net, and version are implemented."),
+		"  " + tr.T("TUI, web, summary, watch, ps, kill, update, net, MCP, and version are implemented."),
 	}, "\n") + "\n"
 }
 
