@@ -64,7 +64,7 @@ release:
   prerelease: auto
   mode: replace
   header: |
-    {{ .ProjectName }} {{ .Tag }} is a cross-platform terminal system monitor with JSON output, a web dashboard, network diagnostics, and embeddable Go APIs.
+    {{ .ProjectName }} {{ .Tag }} is a cross-platform terminal system monitor with JSON output, a web dashboard, a read-only local MCP server, network diagnostics, and embeddable Go APIs.
 
     ## Changes
   footer: |
@@ -84,13 +84,13 @@ release:
 
     Download archives and Linux packages from the assets below. Verify downloads against `checksums.txt` before installation.
 
-    [Documentation](https://vminfo.bestcheapvps.org) · [Quick start](https://vminfo.bestcheapvps.org/guide/quick-start) · [Command reference](https://vminfo.bestcheapvps.org/commands/) · [Compare releases](https://github.com/cloudapp3/vminfo/releases)
+    [Documentation](https://vminfo.bestcheapvps.org) · [MCP setup](https://vminfo.bestcheapvps.org/commands/mcp) · [Quick start](https://vminfo.bestcheapvps.org/guide/quick-start) · [Command reference](https://vminfo.bestcheapvps.org/commands/) · [Compare releases](https://github.com/cloudapp3/vminfo/releases)
 
 nfpms:
   - id: packages
     package_name: vminfo
     maintainer: cloudapp3
-    description: Terminal system monitor with JSON output and a web dashboard
+    description: Terminal system monitor with JSON, web dashboard, and read-only MCP tools
     homepage: https://vminfo.bestcheapvps.org
     license: MIT
     formats:
