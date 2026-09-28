@@ -64,8 +64,9 @@ func (sc *staticCache) get(ctx context.Context) (StaticInfo, hostBase, error) {
 }
 
 type cpuSample struct {
-	total float64
-	idle  float64
+	total  float64
+	idle   float64
+	iowait float64
 }
 
 type netSample struct {
@@ -233,6 +234,7 @@ func buildRuntimeStats(ctx context.Context, opts Options, base hostBase) (Runtim
 
 	if cpuStartErr == nil && cpuEndErr == nil {
 		stats.CPU = calcCPUUsage(startCPU, endCPU)
+		stats.IOWaitPercent = calcIOWaitPercent(startCPU, endCPU)
 	}
 
 	if coreStartErr == nil && coreEndErr == nil && len(startCores) == len(endCores) {
@@ -327,7 +329,9 @@ func parseCPUSample(stat cpu.TimesStat) cpuSample {
 		// Linux accounts guest and guest_nice time inside user and nice already.
 		total -= stat.Guest + stat.GuestNice
 	}
-	return cpuSample{total: total, idle: idle}
+	// Keep CPU% semantics unchanged (iowait still counts as idle) while also
+	// carrying the raw iowait counter for calcIOWaitPercent.
+	return cpuSample{total: total, idle: idle, iowait: stat.Iowait}
 }
 
 func calcCPUUsage(start, end cpuSample) float64 {
@@ -341,6 +345,22 @@ func calcCPUUsage(start, end cpuSample) float64 {
 		return 0
 	}
 	return (used / total) * 100
+}
+
+// calcIOWaitPercent derives the iowait share of total CPU time over the
+// dual-sample window. Returns 0 when the window carries no usable deltas,
+// matching the "metric absent" convention consumers expect.
+func calcIOWaitPercent(start, end cpuSample) float64 {
+	total := end.total - start.total
+	iowait := end.iowait - start.iowait
+	if total <= 0 || iowait < 0 {
+		return 0
+	}
+	pct := (iowait / total) * 100
+	if pct > 100 {
+		pct = 100
+	}
+	return pct
 }
 
 func readNetSample(ctx context.Context) (netSample, error) {

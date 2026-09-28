@@ -29,10 +29,14 @@ type StaticInfo struct {
 
 // RuntimeStats contains sampled runtime metrics for the local host.
 type RuntimeStats struct {
-	CPU            float64           `json:"cpu"`
-	CPUPerCore     []float64         `json:"cpu_per_core,omitempty"`
-	CPUCount       int               `json:"cpu_count,omitempty"`
-	CPUFreqMHz     float64           `json:"cpu_freq_mhz,omitempty"`
+	CPU        float64   `json:"cpu"`
+	CPUPerCore []float64 `json:"cpu_per_core,omitempty"`
+	CPUCount   int       `json:"cpu_count,omitempty"`
+	CPUFreqMHz float64   `json:"cpu_freq_mhz,omitempty"`
+	// IOWaitPercent is the iowait share of total CPU time over the same
+	// dual-sample window as CPU. Linux-only; other platforms report 0,
+	// which consumers should treat as "metric absent".
+	IOWaitPercent  float64           `json:"iowait_percent,omitempty"`
 	MemUsed        uint64            `json:"mem_used,omitempty"`
 	SwapUsed       uint64            `json:"swap_used,omitempty"`
 	DiskUsed       uint64            `json:"disk_used,omitempty"`

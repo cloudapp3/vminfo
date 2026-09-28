@@ -88,3 +88,34 @@ func TestParseCPUSampleDoesNotDoubleCountGuestTime(t *testing.T) {
 		t.Fatalf("parseCPUSample() = %+v, want total=%v idle=%v", got, wantTotal, wantIdle)
 	}
 }
+
+func TestParseCPUSampleCarriesIowait(t *testing.T) {
+	stat := cpu.TimesStat{User: 100, System: 20, Idle: 50, Iowait: 7}
+	got := parseCPUSample(stat)
+	if got.iowait != 7 {
+		t.Fatalf("parseCPUSample().iowait = %v, want 7", got.iowait)
+	}
+}
+
+func TestCalcIOWaitPercent(t *testing.T) {
+	cases := []struct {
+		name  string
+		start cpuSample
+		end   cpuSample
+		want  float64
+	}{
+		{"normal window", cpuSample{total: 1000, iowait: 10}, cpuSample{total: 2000, iowait: 110}, 10},
+		{"zero delta total", cpuSample{total: 1000, iowait: 10}, cpuSample{total: 1000, iowait: 20}, 0},
+		{"negative total", cpuSample{total: 2000, iowait: 10}, cpuSample{total: 1000, iowait: 20}, 0},
+		{"negative iowait", cpuSample{total: 1000, iowait: 50}, cpuSample{total: 2000, iowait: 10}, 0},
+		{"clamped above 100", cpuSample{total: 1000, iowait: 0}, cpuSample{total: 1100, iowait: 1100}, 100},
+		{"zero iowait", cpuSample{total: 1000, iowait: 0}, cpuSample{total: 2000, iowait: 0}, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := calcIOWaitPercent(tc.start, tc.end); got != tc.want {
+				t.Fatalf("calcIOWaitPercent(%+v, %+v) = %v, want %v", tc.start, tc.end, got, tc.want)
+			}
+		})
+	}
+}
