@@ -59,6 +59,10 @@ func runUpdate(ctx context.Context, stdout, stderr io.Writer, args []string, tr 
 		CurrentVer:  meta.Version,
 		GitHubToken: updateTokenFromEnv(),
 		CacheDir:    updater.CacheDir(),
+		// An explicit update run is an install intent: always resolve the
+		// real latest release instead of trusting the notification cache,
+		// which can hide a just-published version for up to the TTL.
+		SkipCache: !checkOnly,
 	})
 
 	targetTag := normalizeReleaseTag(targetVersion)

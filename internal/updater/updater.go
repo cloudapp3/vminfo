@@ -21,6 +21,10 @@ type Config struct {
 	CacheDir    string
 	CacheTTL    time.Duration
 	HTTPClient  *http.Client
+	// SkipCache forces a live API check regardless of TTL. Set it when the
+	// caller acts on the result (install); cached answers are only meant to
+	// rate-limit passive notification checks.
+	SkipCache bool
 }
 
 // CheckResult is returned by check operations.
@@ -60,6 +64,9 @@ func (u *Updater) CheckForUpdate(ctx context.Context) (*CheckResult, error) {
 	cache, _ := ReadCacheAt(u.cfg.CacheDir)
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if u.cfg.SkipCache {
+		cache = CacheFile{}
 	}
 	if !ShouldCheck(cache, u.cfg.CacheTTL) && cache.LatestVersion != "" {
 		latest := stripVersionPrefix(cache.LatestVersion)
