@@ -15,19 +15,32 @@ import (
 
 // ── Styles & Constants ────────────────────────────────────────────────
 
+// Shared styles are rebuilt from the active theme by rebuildStyles (called
+// from applyTheme) because styles capture their colors at construction time.
 var (
+	outerStyle  lipgloss.Style
+	panelStyle  lipgloss.Style
+	subtleStyle lipgloss.Style
+	warnStyle   lipgloss.Style
+	errorStyle  lipgloss.Style
+	valueStyle  lipgloss.Style
+)
+
+func rebuildStyles() {
 	outerStyle = lipgloss.NewStyle().Padding(0, 1)
 
 	panelStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			Padding(0, 1).
-			BorderForeground(CBorder)
+		Border(lipgloss.RoundedBorder()).
+		Padding(0, 1).
+		BorderForeground(CBorder)
 
 	subtleStyle = lipgloss.NewStyle().Foreground(CDim)
-	warnStyle   = lipgloss.NewStyle().Foreground(CYellow)
-	errorStyle  = lipgloss.NewStyle().Foreground(CRed)
-	valueStyle  = lipgloss.NewStyle().Foreground(CText).Bold(true)
+	warnStyle = lipgloss.NewStyle().Foreground(CYellow)
+	errorStyle = lipgloss.NewStyle().Foreground(CRed)
+	valueStyle = lipgloss.NewStyle().Foreground(CText).Bold(true)
+}
 
+var (
 	labelW = 8
 
 	// Progress bar chars
@@ -619,7 +632,7 @@ func sortInterfaces(ifaces []vminfo.InterfaceIO) []vminfo.InterfaceIO {
 	return sorted
 }
 
-func loadColor(load float64, cores uint32) lipgloss.Color {
+func loadColor(load float64, cores uint32) lipgloss.TerminalColor {
 	if cores == 0 {
 		cores = 1
 	}
@@ -726,7 +739,7 @@ func renderSparkline(data []float64, width int) string {
 	// Pad left with ▁ when insufficient data
 	padCount := width - len(sampled)
 	if padCount > 0 {
-		padChar := lipgloss.NewStyle().Foreground(lipgloss.Color("#4a5568")).Render(string(sparklineChars[0]))
+		padChar := lipgloss.NewStyle().Foreground(CMuted).Render(string(sparklineChars[0]))
 		for range padCount {
 			sb.WriteString(padChar)
 		}
@@ -751,7 +764,7 @@ func sampleData(data []float64, targetLen int) []float64 {
 
 // ── Color Helpers ────────────────────────────────────────────────────
 
-func colorForPercent(pct float64) lipgloss.Color {
+func colorForPercent(pct float64) lipgloss.TerminalColor {
 	return ThresholdColor(pct)
 }
 
@@ -760,7 +773,7 @@ func colorizePercent(pct float64) string {
 }
 
 // colorForTempEnhanced uses 4-tier thresholds for CPU temperature display.
-func colorForTempEnhanced(temp float64) lipgloss.Color {
+func colorForTempEnhanced(temp float64) lipgloss.TerminalColor {
 	switch {
 	case temp >= 90:
 		return CCritical
@@ -821,14 +834,14 @@ func (m Model) kv(key, value string) string {
 // ── Processes View ───────────────────────────────────────────────────
 
 // depthColor returns a dimmer text color based on tree depth.
-func depthColor(depth int) lipgloss.Color {
+func depthColor(depth int) lipgloss.TerminalColor {
 	switch depth {
 	case 0:
 		return CText
 	case 1:
-		return lipgloss.Color("#a0a8c0")
+		return CMuted
 	case 2:
-		return lipgloss.Color("#8088a0")
+		return CDim
 	default:
 		return CDim
 	}
@@ -854,8 +867,8 @@ func (m Model) renderProcessTree() string {
 	hdr := m.panelTitle("Processes (tree)")
 	headerLines := []string{hdr, ""}
 	headerLines = append(headerLines, subtleStyle.Render(fmt.Sprintf("%-6s %5s %5s  %s", m.tr.T("PID"), m.tr.T("CPU%"), m.tr.T("MEM%"), m.tr.T("NAME"))))
-	connectorColor := lipgloss.Color("#444444")
-	selectedBg := lipgloss.Color("#2D4F67")
+	connectorColor := CMuted
+	selectedBg := CSelectBg
 	selectedIndex := clampIndex(m.selected, len(flatNodes))
 	rowIndex := 0
 	rowLines := make([]string, 0, len(flatNodes))
@@ -992,7 +1005,7 @@ func (m Model) renderProcesses() string {
 	case sortPID:
 		pidHeader += sortArrow
 	}
-	hdrStyle := lipgloss.NewStyle().Bold(true).Underline(true).Foreground(CDim).Background(lipgloss.Color("#2A2A3E"))
+	hdrStyle := lipgloss.NewStyle().Bold(true).Underline(true).Foreground(CText).Background(CSurfaceBg)
 	headerLine := lipgloss.NewStyle().Width(colPID).Render(pidHeader) +
 		strings.Repeat(" ", colGap) +
 		lipgloss.NewStyle().Width(colCPU).Render(cpuHeader) +
@@ -1006,9 +1019,9 @@ func (m Model) renderProcesses() string {
 		lipgloss.NewStyle().Width(colName).Render(m.tr.T("NAME"))
 	headerLines = append(headerLines, hdrStyle.Width(innerW).Render("  "+headerLine))
 
-	selectedBg := lipgloss.Color("#2D4F67")
-	oddBg := lipgloss.Color("#1A1A2E")
-	evenBg := lipgloss.Color("#16213E")
+	selectedBg := CSelectBg
+	oddBg := COddBg
+	evenBg := CEvenBg
 
 	// Render ALL process rows (viewport handles scrolling)
 	rowLines := make([]string, 0, len(items))
@@ -1046,7 +1059,7 @@ func (m Model) renderProcesses() string {
 			row = lipgloss.NewStyle().Background(selectedBg).Width(innerW).Render(row)
 		} else if isIdle {
 			row = lipgloss.NewStyle().Foreground(CMuted).Background(
-				lipgloss.Color(map[int]lipgloss.Color{0: evenBg, 1: oddBg}[idx%2])).Width(innerW).Render(row)
+				map[int]lipgloss.AdaptiveColor{0: evenBg, 1: oddBg}[idx%2]).Width(innerW).Render(row)
 		} else {
 			bg := evenBg
 			if idx%2 == 1 {
@@ -1118,6 +1131,7 @@ func (m Model) renderHelp() string {
 		{"up / down", m.tr.T("move process selection")},
 		{"s", m.tr.T("cycle process sort")},
 		{"t", m.tr.T("toggle tree view")},
+		{"T", m.tr.T("cycle theme")},
 		{"/", m.tr.T("filter processes by name")},
 		{"k", m.tr.T("kill selected process")},
 		{"K", m.tr.T("toggle kernel threads")},
@@ -1238,7 +1252,7 @@ func (m Model) hintsForMode() string {
 		base := hint("tab", m.tr.T("view")) + hint("↑↓", m.tr.T("select")) + hint("s", m.tr.T("sort")) + hint("t", m.tr.T("tree")) + hint("/", m.tr.T("filter")) + hint("k", "kill") + hint("K", m.tr.T("kthreads")) + hint("p", m.tr.T("pause")) + hint("r", m.tr.T("refresh")) + hint("?", m.tr.T("help")) + hint("q", m.tr.T("exit"))
 		return base
 	default:
-		return hint("tab", m.tr.T("view")) + hint("+/-", m.tr.T("interval")) + hint("p", m.tr.T("pause")) + hint("r", m.tr.T("refresh")) + hint("?", m.tr.T("help")) + hint("q", m.tr.T("exit"))
+		return hint("tab", m.tr.T("view")) + hint("+/-", m.tr.T("interval")) + hint("p", m.tr.T("pause")) + hint("T", m.tr.T("theme")) + hint("r", m.tr.T("refresh")) + hint("?", m.tr.T("help")) + hint("q", m.tr.T("exit"))
 	}
 }
 
@@ -1264,7 +1278,7 @@ func (m Model) stateLabel() string {
 	}
 }
 
-func (m Model) stateColor() lipgloss.Color {
+func (m Model) stateColor() lipgloss.TerminalColor {
 	switch m.stateLabel() {
 	case "ONLINE":
 		return CGreen
@@ -1277,10 +1291,10 @@ func (m Model) stateColor() lipgloss.Color {
 	}
 }
 
-func (m Model) renderBadge(text string, color lipgloss.Color) string {
+func (m Model) renderBadge(text string, color lipgloss.TerminalColor) string {
 	return lipgloss.NewStyle().
 		Foreground(color).
-		Background(lipgloss.Color("#1a1b26")).
+		Background(CBadgeBg).
 		Bold(true).
 		Padding(0, 1).
 		Render(text)

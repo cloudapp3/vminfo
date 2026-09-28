@@ -129,6 +129,10 @@ func RunWithOptions(ctx context.Context, opts RunOptions) error {
 	if err != nil {
 		return err
 	}
+	// Theme precedence: VMINFO_THEME env var > persisted preference > default.
+	cfg := LoadConfig()
+	InitTheme(cfg.Theme)
+
 	program := tea.NewProgram(
 		newModel(ctx, staticInfo, opts.TR),
 		tea.WithOutput(opts.Stdout),
@@ -137,7 +141,13 @@ func RunWithOptions(ctx context.Context, opts RunOptions) error {
 		tea.WithMouseCellMotion(),
 	)
 	_, err = program.Run()
-	return err
+	if err != nil {
+		return err
+	}
+	// Persist the theme chosen in this session (T cycles it at runtime).
+	cfg.Theme = activeTheme.Name
+	_ = SaveConfig(cfg)
+	return nil
 }
 
 func newModel(ctx context.Context, staticInfo vminfo.StaticInfo, tr *i18n.Translator) Model {
@@ -355,6 +365,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.selected = 0
 		m.refreshProcessListState()
+		return m, nil
+	}
+
+	if rawKey == "T" {
+		CycleTheme()
+		m.statusText = m.tr.Tf("theme: %s", activeTheme.Name)
 		return m, nil
 	}
 
